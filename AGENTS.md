@@ -35,6 +35,9 @@ This is a **public repository** — code and docs must read well to a stranger.
   its doc update — README pipeline diagram + status line, `data/README.md`
   artifact table, `evals/README.md` counts, `docs/decisions.md` ADR, and
   `KNOWN_GAPS.md`. A doc that lags the code is a bug, not a follow-up task.
+- **Commits use conventional prefixes** — `feat:`/`fix:`/`docs:`/
+  `refactor:`/`test:`/`chore:`, one-line subject, atomic diffs. The repo is
+  public: the log is part of the evidence.
 
 ## Verified facts (measured on the live corpus)
 
