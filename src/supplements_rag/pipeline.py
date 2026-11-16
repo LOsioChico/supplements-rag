@@ -428,29 +428,9 @@ def _extractive_answer(
     t = time.monotonic()
     att: dict = {"errors": []}
     try:
-        got, best = extract.claims(question, pack, ask_fn=ask_fn, key=key)
-        if got and entity_tokens(index, question):
-            # the question names a corpus-rare or absent substance — each
-            # kept quote must be about IT under some name, or the answer
-            # is about a different substance entirely (myricetin ≠ myrcia)
-            with ThreadPoolExecutor(max_workers=6) as ex:
-                escores = list(
-                    ex.map(
-                        lambda c: extract.entity_score(
-                            question,
-                            c["text"],
-                            chunks_by_id[str(c["ids"][0])]["title"],
-                            ask_fn=ask_fn,
-                            key=key,
-                        ),
-                        got,
-                    )
-                )
-            kept = [c for c, s in zip(got, escores) if s >= extract.ENTITY_MIN]
-            att["entity_scores"] = escores
-            if len(kept) < len(got):
-                att["entity_dropped"] = len(got) - len(kept)
-            got = kept
+        got, best = extract.claims(
+            question, pack, index, ask_fn=ask_fn, key=key, meta=att
+        )
         direction = (
             extract.direction_for(question, got, ask_fn=ask_fn, key=key) if got else ""
         )
@@ -989,8 +969,37 @@ def _extractive_events(
                 }
         cscores = [cs[i] for i in range(len(pack))]
         best = max(cscores, default=0.0)
-        top = sorted(zip(cscores, pack), key=lambda x: -x[0])[: extract.TOP_CHUNKS]
-        cands = extract.candidates(top)
+        ranked = sorted(zip(cscores, pack), key=lambda x: -x[0])
+        pool = ranked[: extract.TOP_CHUNKS]
+        if entity_tokens(index, question):
+            # the question names a corpus-rare or absent substance — only
+            # chunks the entity check confirms can produce quotes for it
+            e_n = min(extract.ENTITY_POOL, len(ranked))
+            yield {"event": "extract", "phase": "entity", "done": 0, "n": e_n}
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                futs = {
+                    ex.submit(
+                        extract.entity_score,
+                        question,
+                        c,
+                        ask_fn=ask_fn,
+                        key=key,
+                    ): i
+                    for i, (_, c) in enumerate(ranked[:e_n])
+                }
+                es: dict[int, float] = {}
+                for f in as_completed(futs):
+                    es[futs[f]] = f.result()
+                    yield {
+                        "event": "extract",
+                        "phase": "entity",
+                        "done": len(es),
+                        "n": e_n,
+                    }
+            pool = [ranked[i] for i in range(e_n) if es[i] >= extract.ENTITY_MIN][
+                : extract.TOP_CHUNKS
+            ]
+        cands = extract.candidates(pool)
         yield {
             "event": "extract",
             "phase": "sentences",
@@ -1020,37 +1029,6 @@ def _extractive_events(
                 }
         sscores = [ss[j] for j in range(len(cands))]
         got = extract.keep(cands, sscores)
-        if got and entity_tokens(index, question):
-            # the question names a corpus-rare or absent substance — each
-            # kept quote must be about IT under some name (entity phase)
-            yield {
-                "event": "extract",
-                "phase": "entity",
-                "done": 0,
-                "n": len(got),
-            }
-            with ThreadPoolExecutor(max_workers=6) as ex:
-                futs = {
-                    ex.submit(
-                        extract.entity_score,
-                        question,
-                        c["text"],
-                        chunks_by_id[str(c["ids"][0])]["title"],
-                        ask_fn=ask_fn,
-                        key=key,
-                    ): i
-                    for i, c in enumerate(got)
-                }
-                es: dict[int, float] = {}
-                for f in as_completed(futs):
-                    es[futs[f]] = f.result()
-                    yield {
-                        "event": "extract",
-                        "phase": "entity",
-                        "done": len(es),
-                        "n": len(got),
-                    }
-            got = [c for i, c in enumerate(got) if es[i] >= extract.ENTITY_MIN]
     except judge.JudgeError as e:
         yield {**unavailable, "judge_error": str(e), "ms": _ms(t0)}
         return

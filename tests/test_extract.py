@@ -51,6 +51,59 @@ def test_claims_empty_when_nothing_scores():
     assert got == [] and best == 0.1
 
 
+def _entity_routed(entity_map, default=0.9):
+    """Stub that answers every score 0.9 EXCEPT entity_score, whose
+    'same substance' instruction routes to the per-chunk map — the
+    mechanism under test, everything else held at a passing score."""
+
+    def fn(text, questions, *, key=None):
+        out: dict = {}
+        for k, q in questions.items():
+            if q["type"] == "choice":
+                out[k] = {"choice": "evidence"}
+            elif k == "injection":
+                out[k] = {"noul": 0.05}
+            elif "same substance" in q.get("instructions", ""):
+                score = next(
+                    (s for needle, s in entity_map.items() if needle in text),
+                    default,
+                )
+                out[k] = {"noul": score}
+            else:
+                out[k] = {"noul": 0.9}
+        return out
+
+    return fn
+
+
+def test_claims_entity_gate_drops_wrong_entity_chunks():
+    # 'magnesium' is df=1 → rare in INDEX, so the gate fires; the
+    # magnesium-free chunk fails identity even though its sentences
+    # would score 0.9 — a wrong-entity chunk produces no candidates
+    meta: dict = {}
+    got, _ = extract.claims(
+        "does magnesium help sleep",
+        PACK,
+        INDEX,
+        ask_fn=_entity_routed({"Unrelated": 0.1}),
+        meta=meta,
+    )
+    assert got and all(c["ids"] == ["1"] for c in got)
+    assert meta["entity_dropped"] == 1
+
+
+def test_claims_entity_gate_blocks_when_no_chunk_names_the_entity():
+    # every chunk fails identity → empty claims despite 0.9 sentence
+    # scores — the pack is about a different substance entirely
+    got, _ = extract.claims(
+        "does magnesium help sleep",
+        PACK,
+        INDEX,
+        ask_fn=_entity_routed({}, default=0.1),
+    )
+    assert got == []
+
+
 def test_compose_answered_shape_matches_contract():
     obj = extract.compose([{"text": "quote.", "ids": ["1"]}])
     assert obj["status"] == "answered"
@@ -128,6 +181,23 @@ def test_pipeline_extractive_lane_answers_with_quotes(monkeypatch):
     assert out["claims"][0]["ids"] == ["1"]
     src = CHUNKS[out["claims"][0]["ids"][0]]["text"]
     assert out["claims"][0]["text"] in src  # verbatim, not generated
+
+
+def test_pipeline_extractive_lane_unclear_when_entity_is_wrong(monkeypatch):
+    # 'magnesium' is df=1 → rare in INDEX: the entity gate fires, and a
+    # pack whose sources fail identity goes unclear even at 0.9 sentence
+    # scores — the integration point is pipeline passing `index` through
+    from supplements_rag import pipeline
+
+    monkeypatch.setenv("EXTRACTIVE", "1")
+    out = pipeline.answer(
+        "does magnesium help sleep",
+        [],
+        CHUNKS,
+        INDEX,
+        ask_fn=_entity_routed({}, default=0.05),
+    )
+    assert out["status"] == "unclear"
 
 
 def test_pipeline_extractive_lane_unclear_when_nothing_scores(monkeypatch):

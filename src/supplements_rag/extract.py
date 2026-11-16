@@ -21,6 +21,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 
 from . import judge
+from .bm25 import entity_tokens
 
 # sentences are only mined from the best-scoring chunks — the rest can't
 # produce a sentence that reaches GROUNDED_MIN anyway
@@ -34,6 +35,9 @@ SENT_MIN = 0.6
 # tuned on the golden slice: 0.6 keeps betaine-in-a-malnutrition-study
 # while griffonia-for-scopolia (0.55) still fails
 ENTITY_MIN = 0.6
+# entity-check runs on the top-ranked chunks plus a couple of
+# replacement ranks — a dropped leader still leaves quote material
+ENTITY_POOL = 5
 # sentence ends only before a capital/digit — 'L. acidophilus', 'et al.',
 # 'vs.' stay inside their sentence so quotes don't shatter mid-name
 _SENT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
@@ -78,23 +82,25 @@ def sentence_score(
     return answers["ev"]["noul"]
 
 
-def entity_score(
-    question: str, sentence: str, title: str, *, ask_fn=judge.ask, key=None
-) -> float:
-    """noul score: does this evidence concern the SAME substance the
-    question names? A dedicated single-criterion check — folded into
-    sentence_score the judge trades entity identity off against topical
-    relevance (myricetin-for-myrcia scored 0.81 there, 0.31 here)."""
+def entity_score(question: str, chunk: dict, *, ask_fn=judge.ask, key=None) -> float:
+    """noul score: does this SOURCE study the same substance the question
+    names? Scored at chunk level, not sentence level — the abstract body
+    defines what a bare quote can't (a trial codenamed 'ART' names its
+    substance in the full text). A dedicated single-criterion check:
+    folded into question/sentence_score the judge trades identity off
+    against topical relevance (myricetin-for-myrcia scored 0.81 folded
+    into sentence_score, 0.31 as this dedicated check)."""
     answers = ask_fn(
-        f"Source: {title}\nSentence: {sentence}\n\nQuestion: {question}",
+        f"Source:\n{chunk['title']}\n{chunk['text'][:12000]}\n\nQuestion: {question}",
         {
             "ev": {
                 "type": "noul",
-                "instructions": "Does this evidence study the same "
-                "substance or intervention the question names? Count only "
+                "instructions": "Does this source study the same "
+                "substance or intervention the question names? Count "
                 "exact identity or an established name for the identical "
-                "thing — constituents, derivatives, and related compounds "
-                "are NOT the same substance.",
+                "thing — including a codename or abbreviation the source "
+                "itself defines. Constituents, derivatives, and related "
+                "compounds are NOT the same substance.",
             }
         },
         key=key,
@@ -125,11 +131,20 @@ def keep(cands: list[tuple], sscores: list[float]) -> list[dict]:
 
 
 def claims(
-    question: str, pack: list[dict], *, ask_fn=judge.ask, key=None
+    question: str,
+    pack: list[dict],
+    index: dict | None = None,
+    *,
+    ask_fn=judge.ask,
+    key=None,
+    meta: dict | None = None,
 ) -> tuple[list[dict], float]:
     """(claims, best chunk score) — verbatim sentences >= SENT_MIN,
-    best first, each citing its own PMID. JudgeError propagates: the
-    pipeline fails closed on a judge outage."""
+    best first, each citing its own PMID. When `index` is given and the
+    question names a corpus-rare/absent entity, only chunks the entity
+    check confirms can produce quotes — a wrong-entity chunk's sentences
+    can't answer for the named substance (meta collects the scores).
+    JudgeError propagates: the pipeline fails closed on a judge outage."""
     with ThreadPoolExecutor(max_workers=6) as ex:
         cscores = list(
             ex.map(
@@ -138,7 +153,22 @@ def claims(
             )
         )
     best = max(cscores, default=0.0)
-    top = sorted(zip(cscores, pack), key=lambda x: -x[0])[:TOP_CHUNKS]
+    ranked = sorted(zip(cscores, pack), key=lambda x: -x[0])
+    pool = ranked[:TOP_CHUNKS]
+    if index is not None and entity_tokens(index, question):
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            escores = list(
+                ex.map(
+                    lambda c: entity_score(question, c, ask_fn=ask_fn, key=key),
+                    (c for _, c in ranked[:ENTITY_POOL]),
+                )
+            )
+        passed = [x for x, s in zip(ranked[:ENTITY_POOL], escores) if s >= ENTITY_MIN]
+        if meta is not None:
+            meta["entity_scores"] = escores
+            meta["entity_dropped"] = len(ranked[:ENTITY_POOL]) - len(passed)
+        pool = passed[:TOP_CHUNKS]
+    top = pool
     cands = candidates(top)
     with ThreadPoolExecutor(max_workers=6) as ex:
         sscores = list(
@@ -247,5 +277,6 @@ if __name__ == "__main__":
     }
     pack = [chunks[c] for c, _ in bm25_score(index, q, top_k=10) if c in chunks]
     key = os.environ["VLLM_SR_API_KEY"]
-    got, best = claims(q, pack, key=key)
-    print(json.dumps({"best_chunk_score": best, "claims": got}, indent=1))
+    meta: dict = {}
+    got, best = claims(q, pack, index, key=key, meta=meta)
+    print(json.dumps({"best_chunk_score": best, **meta, "claims": got}, indent=1))
