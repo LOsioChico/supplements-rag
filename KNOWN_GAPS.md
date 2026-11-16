@@ -67,11 +67,16 @@ diagram, it should work; if something here gets fixed, delete the line.
 
 ## Built, verified live (single-question CLI runs — not load-tested)
 
-- Gate (injection noul + intent choice, `d3-flash`): evidence/advice/
-  unrelated/injection all classified correctly on live calls — but the
-  golden `advice` rows are safety-information questions (evidence-
-  answerable), so "advice → declined" is NOT the eval expectation;
-  per-row intent gets recorded and judged
+- Gate (injection noul + intent choice, `d3-flash`): the advice/evidence
+  boundary is person-hood — impersonal safety/interaction asks are
+  evidence, first-person framing ("should I take X", "with my meds")
+  takes precedence into advice. Earlier criteria let 'interactions'
+  pull personal asks into evidence — caught live ("should I take
+  ashwagandha with my blood-pressure pills?" screened `evidence`),
+  fixed and battery-verified; six authored golden rows now cover the
+  first-person class the MedQuAD-derived rows never had. Golden
+  `advice` rows tolerate either outcome (`answer_or_decline`) so the
+  route isn't asserted — per-row intent gets recorded and judged
 - Contract + verify + marks: a magnesium question's first attempt failed
   deterministic checks (2 numbers not in cited sources) — caught and
   marked `unverified` on the answer, not silently rewritten (repair was
@@ -80,16 +85,18 @@ diagram, it should work; if something here gets fixed, delete the line.
 - Paths exercised live: answered / declined / refused / unclear (explicit
   `missing` list) / off_topic. `unavailable` (fail-closed on judge outage)
   is unit-tested only.
-- Caveats: writer is `vllm-sr/auto` (routed to qwen3.8-27b today — router
-  may swap models); generation is non-deterministic in claim *shape* even
-  at temperature 0 (same question can answer or abstain across runs —
-  eval-measured); gate `uncertain` → pipeline refuses rather than
-  proceeds (fail-closed); thresholds (INJECTION_MIN 0.7, GROUNDED_MIN 0.7,
-  SCOPE_MIN 0.4) are assumptions — the pool pass data exists to calibrate
-  them, the calibration itself is still owed.
-- Verified-answerable eval rows: ~70% answered; remainder are
-  verify-strictness abstains, unclear-on-verified rows
-  (rescue window vs judge strictness), and rare gate edge cases.
+- Caveats: the opt-in writer lane's model is `vllm-sr/auto` (routed to
+  qwen3.8-27b today — router may swap models) and samples claim *shape*
+  non-deterministically even at temperature 0; the extractive lane
+  measured 0 status flips across 360 runs. Gate `uncertain` → pipeline
+  refuses rather than proceeds (fail-closed). Threshold accumulation:
+  `ENTITY_MIN` is calibrated (1,375 real calls); the rest carry per-row
+  score dumps until their samples are large enough (see above).
+- Verified-answerable eval rows (v8, extractive lane): **91%** answered
+  on golden (120 rows × 3 runs at the time, 0 flips), **92%** on the
+  199-row held-out set; refuted-refusal 100% / 92%, **0 dangerous answers**.
+  Remainder are verify-strictness abstains and unclear-on-verified rows
+  (rescue window vs judge strictness).
 
 ## Housekeeping
 

@@ -49,6 +49,6 @@ This is a **public repository** — code and docs must read well to a stranger.
 - Full answering path verified live: gate → retrieve → contract →
   verify (deterministic + judge) → failed checks mark sentences
   `unverified`; only unparseable output abstains. One pass, no rewrite.
-  Extractive lane is the default (`EXTRACTIVE=0` → writer lane). 57 tests.
+  Extractive lane is the default (`EXTRACTIVE=0` → writer lane). 60 tests.
   The `status` event also carries typed `direction`, `verdict_kind`
   (`generated`|`typed`), and checked `points` findings (ADR-015).

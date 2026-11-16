@@ -138,7 +138,16 @@ each is re-derivable from this repo alone.
   questions — same instruction-shape bug as the rescue). An 'unrelated'
   intent is not an instant veto: the post-retrieval scope judge sees the
   evidence titles before deciding (the gray-zone the BM25 distribution
-  demanded). Advice declines pre-retrieval; gate outage fails closed.
+  demanded). The advice/evidence boundary is person-hood, not topic:
+  impersonal safety/interaction asks are evidence (a cited summary is
+  not a recommendation — the eval's advice category tolerates either),
+  first-person framing ("should I take X", "for me", "with my
+  medication") is advice and takes precedence even when it names a
+  substance or interaction — the earlier criteria let 'interactions'
+  pull personal asks into evidence (live-verified: "should I take
+  ashwagandha with my blood-pressure pills?" screened `evidence`, six
+  authored golden rows now cover the class). Advice declines
+  pre-retrieval; gate outage fails closed.
 - **Contract + verify (built, verified live):** strict JSON
   `{status, verdict, claims: [{text, ids: [pmid]}], missing}` — `verdict`
   is the 1-2 sentence bottom line (a bare claims list read as a study
@@ -300,10 +309,11 @@ each is re-derivable from this repo alone.
   identical thing counts — including codenames the source itself defines;
   constituents, derivatives, and related compounds do not." Only chunks
   ≥ `ENTITY_MIN` (0.6) can produce quote candidates (`ENTITY_POOL` = top
-  5, so a dropped leader leaves replacement material). Runs on both
-  extractive lanes (`claims()` gated by `index` + a streamed `entity`
-  phase); the writer lane (`EXTRACTIVE=0`) doesn't run it — recorded in
-  KNOWN_GAPS. Scoring at chunk level, not quote level: the abstract body
+  5, so a dropped leader leaves replacement material). One implementation
+  serves both lanes: `extract.claims_iter` yields (phase, done, n) tuples —
+  `claims()` drives it silently, the streamed lane wraps the same yields
+  into `extract` events (`entity` phase included); the writer lane
+  (`EXTRACTIVE=0`) doesn't run it — recorded in KNOWN_GAPS. Scoring at chunk level, not quote level: the abstract body
   resolves what a bare sentence can't, and a wrong-entity chunk can't
   produce evidence for the named substance at all.
 - **Why a separate call, not a criterion inside `sentence_score`:** asked
