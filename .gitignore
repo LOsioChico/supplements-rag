@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/*
+!data/README.md
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+node_modules/
+.wrangler/
+evals/admitted.jsonl
+evals/rejected.jsonl
+evals/report.json
+evals/pipeline-report*.jsonl
+evals/pipeline-summary*.json
