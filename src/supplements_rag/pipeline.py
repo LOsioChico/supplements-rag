@@ -28,7 +28,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from . import contract, extract, gate, generate, judge, verify
-from .bm25 import entity_tokens
 from .query import retrieve
 
 ADVICE_DECLINE = (
@@ -949,94 +948,26 @@ def _extractive_events(
     t = time.monotonic()
     # chunk scores drain as they land — the progress events ARE the
     # stream for this lane (there are no writer tokens to show)
+    sent_n = 0
     try:
-        yield {"event": "extract", "phase": "chunks", "done": 0, "n": len(pack)}
-        with ThreadPoolExecutor(max_workers=6) as ex:
-            futs = {
-                ex.submit(
-                    extract.question_score, question, c, ask_fn=ask_fn, key=key
-                ): i
-                for i, c in enumerate(pack)
-            }
-            cs: dict[int, float] = {}
-            for f in as_completed(futs):
-                cs[futs[f]] = f.result()
-                yield {
-                    "event": "extract",
-                    "phase": "chunks",
-                    "done": len(cs),
-                    "n": len(pack),
-                }
-        cscores = [cs[i] for i in range(len(pack))]
-        best = max(cscores, default=0.0)
-        ranked = sorted(zip(cscores, pack), key=lambda x: -x[0])
-        pool = ranked[: extract.TOP_CHUNKS]
-        if entity_tokens(index, question):
-            # the question names a corpus-rare or absent substance — only
-            # chunks the entity check confirms can produce quotes for it
-            e_n = min(extract.ENTITY_POOL, len(ranked))
-            yield {"event": "extract", "phase": "entity", "done": 0, "n": e_n}
-            with ThreadPoolExecutor(max_workers=6) as ex:
-                futs = {
-                    ex.submit(
-                        extract.entity_score,
-                        question,
-                        c,
-                        ask_fn=ask_fn,
-                        key=key,
-                    ): i
-                    for i, (_, c) in enumerate(ranked[:e_n])
-                }
-                es: dict[int, float] = {}
-                for f in as_completed(futs):
-                    es[futs[f]] = f.result()
-                    yield {
-                        "event": "extract",
-                        "phase": "entity",
-                        "done": len(es),
-                        "n": e_n,
-                    }
-            pool = [ranked[i] for i in range(e_n) if es[i] >= extract.ENTITY_MIN][
-                : extract.TOP_CHUNKS
-            ]
-        cands = extract.candidates(pool)
-        yield {
-            "event": "extract",
-            "phase": "sentences",
-            "done": 0,
-            "n": len(cands),
-        }
-        with ThreadPoolExecutor(max_workers=6) as ex:
-            futs = {
-                ex.submit(
-                    extract.sentence_score,
-                    question,
-                    txt,
-                    title,
-                    ask_fn=ask_fn,
-                    key=key,
-                ): j
-                for j, (pmid, title, txt) in enumerate(cands)
-            }
-            ss: dict[int, float] = {}
-            for f in as_completed(futs):
-                ss[futs[f]] = f.result()
-                yield {
-                    "event": "extract",
-                    "phase": "sentences",
-                    "done": len(ss),
-                    "n": len(cands),
-                }
-        sscores = [ss[j] for j in range(len(cands))]
-        got = extract.keep(cands, sscores)
+        gen = extract.claims_iter(question, pack, index, ask_fn=ask_fn, key=key)
+        while True:
+            try:
+                phase, done, n = next(gen)
+            except StopIteration as e:
+                got, best = e.value
+                break
+            if phase == "sentences":
+                sent_n = n
+            yield {"event": "extract", "phase": phase, "done": done, "n": n}
     except judge.JudgeError as e:
         yield {**unavailable, "judge_error": str(e), "ms": _ms(t0)}
         return
     yield {
         "event": "extract",
         "phase": "sentences",
-        "done": len(cands),
-        "n": len(cands),
+        "done": sent_n,
+        "n": sent_n,
         "kept": len(got),
         "best_chunk": best,
         "ms": _ms(t),

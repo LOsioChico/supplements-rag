@@ -18,7 +18,7 @@ CLI: python -m supplements_rag.extract "does magnesium help sleep" \
 """
 
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import judge
 from .bm25 import entity_tokens
@@ -130,6 +130,60 @@ def keep(cands: list[tuple], sscores: list[float]) -> list[dict]:
     return [{"text": txt, "ids": [pmid]} for _, pmid, txt in kept]
 
 
+def _pool_iter(fn, items, phase):
+    """Score items in parallel — yields (phase, done, n) as each result
+    lands (progress drives the streamed lane's `extract` events), returns
+    the ordered score list."""
+    yield (phase, 0, len(items))
+    out: dict[int, float] = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        futs = {ex.submit(fn, x): i for i, x in enumerate(items)}
+        for f in as_completed(futs):
+            out[futs[f]] = f.result()
+            yield (phase, len(out), len(items))
+    return [out[i] for i in range(len(items))]
+
+
+def claims_iter(
+    question: str,
+    pack: list[dict],
+    index: dict | None = None,
+    *,
+    ask_fn=judge.ask,
+    key=None,
+    meta: dict | None = None,
+):
+    """claims() as a generator — yields (phase, done, n) progress tuples as
+    judge scores land (phases: 'chunks', 'entity' when the rare-entity
+    gate fires, 'sentences'). Returns (claims, best) via StopIteration."""
+    cscores = yield from _pool_iter(
+        lambda c: question_score(question, c, ask_fn=ask_fn, key=key),
+        pack,
+        "chunks",
+    )
+    best = max(cscores, default=0.0)
+    ranked = sorted(zip(cscores, pack), key=lambda x: -x[0])
+    pool = ranked[:TOP_CHUNKS]
+    if index is not None and entity_tokens(index, question):
+        escores = yield from _pool_iter(
+            lambda c: entity_score(question, c, ask_fn=ask_fn, key=key),
+            [c for _, c in ranked[:ENTITY_POOL]],
+            "entity",
+        )
+        passed = [x for x, s in zip(ranked[:ENTITY_POOL], escores) if s >= ENTITY_MIN]
+        if meta is not None:
+            meta["entity_scores"] = escores
+            meta["entity_dropped"] = len(ranked[:ENTITY_POOL]) - len(passed)
+        pool = passed[:TOP_CHUNKS]
+    cands = candidates(pool)
+    sscores = yield from _pool_iter(
+        lambda t: sentence_score(question, t[2], t[1], ask_fn=ask_fn, key=key),
+        cands,
+        "sentences",
+    )
+    return keep(cands, sscores), best
+
+
 def claims(
     question: str,
     pack: list[dict],
@@ -145,39 +199,12 @@ def claims(
     check confirms can produce quotes — a wrong-entity chunk's sentences
     can't answer for the named substance (meta collects the scores).
     JudgeError propagates: the pipeline fails closed on a judge outage."""
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        cscores = list(
-            ex.map(
-                lambda c: question_score(question, c, ask_fn=ask_fn, key=key),
-                pack,
-            )
-        )
-    best = max(cscores, default=0.0)
-    ranked = sorted(zip(cscores, pack), key=lambda x: -x[0])
-    pool = ranked[:TOP_CHUNKS]
-    if index is not None and entity_tokens(index, question):
-        with ThreadPoolExecutor(max_workers=6) as ex:
-            escores = list(
-                ex.map(
-                    lambda c: entity_score(question, c, ask_fn=ask_fn, key=key),
-                    (c for _, c in ranked[:ENTITY_POOL]),
-                )
-            )
-        passed = [x for x, s in zip(ranked[:ENTITY_POOL], escores) if s >= ENTITY_MIN]
-        if meta is not None:
-            meta["entity_scores"] = escores
-            meta["entity_dropped"] = len(ranked[:ENTITY_POOL]) - len(passed)
-        pool = passed[:TOP_CHUNKS]
-    top = pool
-    cands = candidates(top)
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        sscores = list(
-            ex.map(
-                lambda t: sentence_score(question, t[2], t[1], ask_fn=ask_fn, key=key),
-                cands,
-            )
-        )
-    return keep(cands, sscores), best
+    it = claims_iter(question, pack, index, ask_fn=ask_fn, key=key, meta=meta)
+    try:
+        while True:
+            next(it)
+    except StopIteration as e:
+        return e.value
 
 
 DIR_PHRASES = {
