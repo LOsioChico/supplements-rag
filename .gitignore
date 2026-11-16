@@ -14,3 +14,4 @@ evals/rejected.jsonl
 evals/report.json
 evals/pipeline-report*.jsonl
 evals/pipeline-summary*.json
+evals/*.log
