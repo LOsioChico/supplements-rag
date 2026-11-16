@@ -46,7 +46,8 @@ _WS = re.compile(r"\s+")
 
 def question_score(question: str, chunk: dict, *, ask_fn=judge.ask, key=None) -> float:
     """noul score: does this chunk provide evidence answering the question?
-    (question-shaped instruction — a question is not a claim)."""
+    (question-shaped instruction — a question is not a claim). The input
+    must be a real question — topical match is not answerability."""
     answers = ask_fn(
         f"Source:\n{chunk['title']}\n{chunk['text'][:12000]}\n\n"
         f"Question being checked: {question}",
@@ -54,7 +55,9 @@ def question_score(question: str, chunk: dict, *, ask_fn=judge.ask, key=None) ->
             "ev": {
                 "type": "noul",
                 "instructions": "Does the source provide evidence that "
-                f"answers this question: {question}",
+                f"answers this question: {question} — only if the checked "
+                "input is itself a question; evidence cannot answer "
+                "something that is not one",
             }
         },
         key=key,

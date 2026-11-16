@@ -346,3 +346,29 @@ each is re-derivable from this repo alone.
   questions nearly always carry a rare token, so "rare" can't mean
   "rarely". Bounded by `ENTITY_POOL` = 5: ≤5 extra judge calls per
   extraction, chunk-level instead of per-claim.
+
+## ADR-017: Non-question inputs — "can this be answered" is part of the score
+
+- **Decision:** `question_score` now requires the checked input to be
+  an actual question — "only if the checked input is itself a question;
+  evidence cannot answer something that is not one". The invariant lives
+  in the answerability score itself — one place, no input-shape list.
+- **Why:** a pasted PubMed URL (`…/42943002/`, the melatonin-fertility
+  paper — in the corpus) ran the whole pipeline: gate said `unrelated`,
+  retrieval BM25-matched the exact paper on the PMID token, and the scope
+  rescue scored topicality max — "does this source answer this question"
+  never asked whether there WAS a question. Sentence scores then ranked
+  noise (NMN sentences) against a URL string and the run answered
+  confidently (verdict 0.97). Every check verified claim↔study; nothing
+  verified input↔question.
+- **Why one score, not per-stage clauses:** `question_score` is the
+  only gate every answering path crosses — the main lane's chunk phase
+  and the unrelated→scope rescue both call it. A non-question input
+  fails there and nothing downstream runs; duplicating the check into
+  `sentence_score` would guard a stage that unreachable input never
+  reaches. And no URL regex: the shape varies (raw PMIDs, pasted
+  abstracts), the invariant doesn't.
+- **Measured live:** URL → scope 0.197, bare `PMID 42943002` → 0.158
+  (both under SCOPE_MIN 0.4 → `off_topic`); control question on the
+  same chunk 0.93 — real questions unaffected. 60 tests, ruff,
+  pyrefly clean.
