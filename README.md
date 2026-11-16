@@ -42,10 +42,10 @@ Every number must literally appear in its cited source (doses, p-values — chec
 
 **Coverage ≠ evidence.** BM25 admits eval questions by lexical overlap — and on 4,026 admitted rows, the judge confirmed real evidence for only 24%. **52% of everything that looked covered has no supporting abstract at all.** A system that answers whatever it retrieves fabricates on half its input — so this one verifies every claim before the answer is trusted (streamed deltas render provisional — stamped `checking` — and only the settled answer is gated), and abstains by design.
 
-Measured on the 120-row golden set:
+Measured on the 120-row golden set (tuning set) **and a 199-row held-out set it never saw** (`evals/heldout.jsonl`, disjoint questions — the anti-overfit check):
 
-- 70–73% of confirmed-answerable rows answered with citations (runs vary — generation is nondeterministic even at temperature 0)
-- Abstain rows: 14–15/15 correct across runs — the single flagged "dangerous" answer was still honest (named mouse-only evidence), not a fabricated benefit
+- **91%** of verified-evidence rows answered with citations (golden, 360 runs across `--repeats 3` — **0 status flips**); held-out: **92%**
+- **100%** of refuted rows safely refused; **0** dangerous answers in 360 runs
 - Rows the corpus can't support are refused or marked `unclear` with an explicit `missing` list
 
 Full eval methodology and per-run history: [evals/README.md](evals/README.md).
@@ -116,7 +116,7 @@ Ingest is resumable: `data/ledger.json` checkpoints every completed window + PMI
 
 - **Built + verified live:** the full answering path — gate (injection + intent), hybrid retrieval (BM25 + dense + rare-entity rescue), strict contract, deterministic + semantic verification, abstain/decline/refuse paths. Two flows share the same checks: `answer()` buffered (nothing leaves before verify — evals use it) and `answer_events()` streamed — tokens + per-claim judge stamps emitted live (`claim_stamp` lands while later claims still generate; ADR-013). The `status` payload carries the typed `direction`, `verdict_kind` (`generated` | `typed` fallback), and checked `points` findings (ADR-015)
 - **Built + verified live:** the local exhibit server — `python -m supplements_rag.serve` (:8778) exposes `GET /v1/ask?q=` as `text/event-stream` of `answer_events()`, spawning `scripts/dense-server.mjs` as a warm sidecar for the embed+Vectorize leg. Same event contract the deployed Worker will serve
-- **Built + measured:** the extractive lane (`extract.py`, `EXTRACTIVE=1`) — answers with VERBATIM quotes instead of generated claims: chunk scores → sentence scores → quotes ≥0.6, same checks after, plus a per-claim entity check when the question names a rare/absent substance — a quote must be about IT, not a related compound (ADR-016). On the same 30-row golden slice: 19/30 correct vs the writer's 9/30, median 3.5s vs 8.6s — grounded by construction, ~2.5× faster (ADR-014)
+- **Built + measured:** the extractive lane (`extract.py`, `EXTRACTIVE=1`) — answers with VERBATIM quotes instead of generated claims: chunk scores → sentence scores → quotes ≥0.6, same checks after, plus a source-level entity check when the question names a rare/absent substance — evidence must be about IT, not a related compound (ADR-016). On the same 30-row golden slice: 19/30 correct vs the writer's 9/30, median 3.5s vs 8.6s — grounded by construction, ~2.5× faster (ADR-014)
 - **Not built yet:** Worker deploy (Python Worker + Workers AI + Vectorize + D1) that renders `answer_events()` over SSE, D1 schema/loaders, freshness cron
 - **Known gaps, stated plainly:** [KNOWN_GAPS.md](KNOWN_GAPS.md) — what's unverified, deferred, or an assumption
 

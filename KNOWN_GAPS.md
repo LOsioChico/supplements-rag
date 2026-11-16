@@ -15,7 +15,18 @@ diagram, it should work; if something here gets fixed, delete the line.
   retrieval missed; they're hard negatives, not proven unanswerable.
 - **Abstention threshold uncalibrated** — golden set shows a thin overlap
   band (abstain max BM25 11.97 vs answerable min 10.99); needs a gray-zone
-  design calibrated on the full admitted pool, not 120 rows.
+  design calibrated on the full admitted pool, not 120 rows. (The judge's
+  question↔source bands ARE now pool-calibrated — 9,268 pairs, bimodal
+  with a 0.20–0.60 valley; the remaining gap is the BM25 side.)
+- **Judge-call thresholds remain tuned on the golden slice** —
+  `INJECTION_MIN`, `GROUNDED_MIN`, `SCOPE_MIN`, `SENT_MIN` have no
+  pool-wide score dumps; each is set at a demonstrated gap from live
+  checks (`docs/decisions.md` records the observations). `ENTITY_MIN`
+  escaped this class — calibrated on 1,375 real calls from the v8 run
+  (dropped p50 0.02 vs kept min 0.60). Eval rows persist `scores`
+  (`entity_scores`, `grounded`, `synth_score`, `best_chunk`) so the
+  remaining thresholds accumulate a distribution with every run —
+  recalibrate once each sample is large enough.
 - **1,445 SuppLLMent items rejected as `labeled_insufficient_but_covered`** —
   corpus mentions the pair but the label says insufficient evidence. Review
   queue, not silently admitted.
@@ -26,12 +37,15 @@ diagram, it should work; if something here gets fixed, delete the line.
   different substance (claim↔source checks can't see question↔claim
   mismatch). Opt-in path, unexercised by evals — fix lands if the writer
   lane becomes the default again (ADR-016).
-- **Codename'd / unnamed interventions defeat the entity check** —
-  evidence that never names its substance in quotable span (a trial
-  codenamed `ART`, "participants maintained performance") drops to
-  `unclear` even when the abstract genuinely studies it. ~3 verified
-  golden answers lost this way — the quote can't demonstrate its own
-  entity, so the trade stands unless the pack stage gets smarter (ADR-016).
+- **The eval's own semantic labels carry the entity hole** —
+  `evals/verify.py` asks "does this abstract answer the question" without
+  anchoring the substance, so `semantic_verified` partly means "verified
+  for the condition" (marine-oil studies verified as wallflower-for-
+  arthritis evidence). Re-running verification with entity-anchored
+  instructions would sharpen the golden's truth column. The held-out
+  run showed the sibling: `semantic_refuted` flags the *proposed* PMIDs,
+  not the achievable answer — 6 rows "refused" by label were answered
+  correctly on other correct-entity evidence (entity scores 0.66–0.97).
 
 ## Deliberately deferred (not bugs)
 

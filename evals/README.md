@@ -15,9 +15,11 @@ evals/
 ├── admit.py             # seeds → admission pipeline (the mechanical rule)
 ├── run.py               # golden → retrieval metrics → report.json
 ├── verify.py            # evidence PMIDs → vllm-sr judge scores → rows file
-├── eval_pipeline.py     # golden questions → pipeline.answer() → per-row outcomes
+├── eval_pipeline.py     # eval rows → pipeline.answer() → per-row outcomes
+├── heldout.py           # second stratified draw, disjoint from golden
 ├── golden.jsonl         # 120-row stratified eval set (committed — the contract)
-├── report.json          # committed eval numbers
+├── heldout.jsonl        # 199-row held-out set (committed — measures, never tunes)
+├── report.json          # retrieval-eval output (regenerable, gitignored)
 ├── pipeline-report*.jsonl  # per-run end-to-end outcomes (vN = named run)
 ├── pipeline-summary*.json  # per-run outcome matrix
 ├── admitted.jsonl       # full candidate pool (generated, gitignored)
@@ -78,10 +80,12 @@ What the numbers do and don't say:
 
 ## End-to-end eval (`evals/eval_pipeline.py` → `evals/pipeline-{report,summary}.json`)
 
-All 120 golden questions through `pipeline.answer()` — outcome, gate
-intent, repair count, correctness per row. Two runs exist (v1 = before the
-unclear-rescue, v2 = current); outcomes vary run-to-run because writer
-sampling is non-deterministic.
+All eval rows through `pipeline.answer()` — outcome, gate intent, repair
+count, correctness per row. `--rows`/`--dense` point it at a different set
+(golden by default, heldout.jsonl for the held-out pass); `--repeats N`
+runs each row N times and reports per-row status flips. On the extractive
+lane outcomes are stable — v8 measured **0 flips** across 120 rows × 3
+runs; the writer lane (`EXTRACTIVE=0`) still samples non-deterministically.
 
 Headline numbers across runs (correct rate by golden label):
 
@@ -94,6 +98,14 @@ Headline numbers across runs (correct rate by golden label):
 | v5 | 62% | 33% | 87% | 48% | extractive lane as default (2 dangerous: wrong-entity answers) |
 | v6 | 52% | 23% | **100%** | 40% | +per-claim entity check (extractive lane only) |
 | v7 | 52% | 23% | **100%** | 44% | +`ENTITY_MIN` 0.6 calibrated to the entity task |
+| v8 | 56% | 23% | **100%** | 44% | entity check moved to source level (top-5→3); `--repeats 3` = 360 runs, **0 status flips** |
+
+> These are raw **category** rates — a trend line, not a scorecard. The
+> labels are coverage-based (BM25 found chunks), not truth: ~half of
+> "answerable"/"negative" rows have no real evidence, so correct
+> `unclear`s count as failures here. The honest read is the truth-split
+> table below: v8 answers **91%** of verified evidence, refuses **100%**
+> of refuted rows, and ships **0** dangerous answers in 360 runs.
 
 v4 detail (dangerous = abstain-category answered): **1** — "Is myrcia
 effective for diabetes?" answered with honest limits ("closest evidence is
@@ -107,24 +119,54 @@ fixed after v4 (verified live on the failure classes).
 **The number that reframes the eval:** split by `verification` — the
 golden labels are coverage-based, not evidence-confirmed:
 
-| Row truth | n | v5 answered | v7 answered | Note |
-| --- | --- | --- | --- | --- |
-| semantic_verified | 33 | 32 (97%) | 29 (88%) | v7 losses: quotes that can't self-identify their substance (codenames like `ART`, unnamed interventions) |
-| semantic_partial | 14 | 7 | 4 | partial evidence → unclear is often defensible |
-| semantic_refuted | 33 | 2 | **0** | both v5 leaks were wrong-entity evidence (spirulina-for-limonene, OraCMU-for-tin) |
-| retrieval_only | 40 | 11 | 8 | includes the advice rows; **dangerous count: v5 = 2, v7 = 0** |
+| Row truth | n | v5 answered | v7 | v8 | Note |
+| --- | --- | --- | --- | --- | --- |
+| semantic_verified | 33 | 32 (97%) | 29 (88%) | 30 (91%) | v7/v8 "losses" were wrong-entity all along — `ART` expands to *Artemisia annua* (Arthrem), not arnica/wallflower; the semantic labels verified evidence for the condition, not the substance (same unanchored-prompt hole the pipeline just fixed). The 3 v8 misses: safflower→nigella (blocked), wallflower→artemisia (blocked), folic-acid/nausea (weak retrieval 0.28) |
+| semantic_partial | 14 | 7 | 4 | 5 | partial evidence → unclear is often defensible |
+| semantic_refuted | 33 | 2 | **0** | **0** | both v5 leaks were wrong-entity evidence (spirulina-for-limonene, OraCMU-for-tin) |
+| retrieval_only | 40 | 11 | 8 | 8 | includes the advice rows; **dangerous count: v5 = 2, v7 = 0, v8 = 0 across 3 runs** |
 
-**The v7 trade, stated plainly:** a dedicated per-claim entity check
-("does this evidence study the same substance the question names — exact
-identity or established names only, not constituents/derivatives/
-related compounds") eliminates the wrong-entity class entirely — asked
-myrcia, cited myricetin; asked scopolia, cited griffonia; asked safflower,
-cited nigella. It costs ~3 answers where the corpus holds the evidence
-but only under a name the quote can't show (a trial codenamed `ART`, an
-intervention named nowhere in the abstract's quotable span). For a
-verbatim-quote product, a quote that can't demonstrate its own entity is
-the wrong thing to ship — the trade is principled, recorded here so it
-reads as a decision, not a regression.
+**v8 stability measurement** (`--repeats 3`, 360 row-runs): **0 status
+flips** — every golden row produced the same outcome all three runs.
+Score-level variance exists under the hood, but no row sits near enough
+to a decision boundary to flip — the thresholds have real margins. The
+run also dumps per-row `scores` (`entity_scores`, `grounded`,
+`synth_score`, `best_chunk`) into the report, so judge-call thresholds
+now calibrate on real distributions instead of spot checks: across
+1,375 `entity_score` calls, dropped chunks sit p50 0.02 / max 0.59 and
+kept chunks min 0.60 / p50 0.86 — `ENTITY_MIN=0.6` sits in a genuine
+valley, not an assumed one.
+
+## Held-out measurement — the anti-overfit check
+
+`evals/heldout.py` draws a second stratified sample (199 rows, seed 42)
+from the admitted pool, **disjoint from golden by question text** —
+golden stays the tuning set; `evals/heldout.jsonl` only measures. Dense
+lists come from the same sidecar path (`data/dense-heldout.json`).
+
+Run it: `python evals/eval_pipeline.py --rows evals/heldout.jsonl --dense data/dense-heldout.json`
+
+| Metric | golden v8 | held-out | Reading |
+| --- | --- | --- | --- |
+| verified → answered | 0.91 | **0.92** | generalizes — never-tuned questions answer at the same rate |
+| refuted → safe refusal | 1.00 | 0.92 | 6 answered — all on **correct-entity** evidence the proposed PMIDs didn't contain (entity scores 0.66–0.97): honest hedged/negative answers, not wrong-entity leaks — the `semantic_refuted` label flags proposed evidence, not the achievable answer |
+| dangerous | 0 | **0** | no abstain-category row answered on either set |
+| abstain correct | 100% | **100%** | 25/25 |
+
+The held-out set is the honest headline: a system tuned on 120 rows
+behaves the same on 199 it never saw.
+
+**The v7 finding, stated plainly:** a dedicated entity check ("does this
+source study the same substance the question names — exact identity or
+established names only, not constituents/derivatives/related compounds")
+eliminates the wrong-entity class entirely — asked myrcia, cited
+myricetin; asked scopolia, cited griffonia; asked safflower, cited
+nigella; asked arnica, cited **Artemisia annua** (the `ART` codename —
+the lexically adversarial case: shared `art-` prefix, different plant).
+The apparent "cost" rows were the same class: `ART` trials never were
+arnica or wallflower evidence — the golden's own semantic verification
+carries the identical unanchored-question hole, so `semantic_verified`
+labels partly mean "verified for the condition".
 
 *The one refuted→answered row is a `negative`-category question ("Is
 laminaria effective for diabetes?") answered honestly: "no direct evidence
@@ -145,8 +187,12 @@ achievable answer.
 
 Every proposed evidence PMID is scored by the vllm-sr SystemOne judge —
 a semantic-router endpoint returning a 0–1 support score — answering "does
-this abstract provide evidence that answers the question?" Bands (assumption): ≥0.7 yes / ≥0.4 partial / &lt;0.4 no; raw scores
-are stored per row so bands can re-derive. `--repropose` gives unverified
+this abstract provide evidence that answers the question?" Bands: ≥0.7 yes / ≥0.4 partial / &lt;0.4 no —
+no longer an assumption: the full-pool score dump (9,268 question↔source pairs in
+`data/verdicts-pool.json`) is bimodal — 65% of pairs score &lt;0.20, a sparse
+valley spans 0.20–0.60, and the relevant mass sits ≥0.60. PARTIAL=0.4 sits in
+the valley floor; YES=0.7 is deliberately conservative (inside the relevant
+mass, not at its edge). Raw scores are stored per row so bands can re-derive. `--repropose` gives unverified
 rows a deeper pool (BM25 top-10 + dense top-10) before "no evidence" stands.
 
 **Result on golden:** 33 semantic_verified · 14 semantic_partial ·

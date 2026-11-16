@@ -293,15 +293,19 @@ each is re-derivable from this repo alone.
 ## ADR-016: Per-claim entity check — the question's substance must BE the quote's substance
 
 - **Decision:** when the question names a corpus-rare or absent entity
-  (`bm25.entity_tokens` — df ≤ ~0.5% of docs, including df=0), every kept
-  quote additionally faces `extract.entity_score` — a dedicated judge
-  call asking only "does this evidence study the same substance or
-  intervention the question names? Exact identity or an established name
-  for the identical thing counts; constituents, derivatives, and related
-  compounds do not." Quotes under `ENTITY_MIN` (0.6) drop individually;
-  an empty remainder is `unclear`. Runs on both extractive lanes
-  (buffered `attempts[].entity_scores` + a streamed `entity` phase); the
-  writer lane (`EXTRACTIVE=0`) doesn't run it — recorded in KNOWN_GAPS.
+  (`bm25.entity_tokens` — df ≤ ~0.5% of docs, including df=0), the
+  top-ranked chunks face `extract.entity_score` — a dedicated judge call
+  asking only "does this SOURCE study the same substance or intervention
+  the question names? Exact identity or an established name for the
+  identical thing counts — including codenames the source itself defines;
+  constituents, derivatives, and related compounds do not." Only chunks
+  ≥ `ENTITY_MIN` (0.6) can produce quote candidates (`ENTITY_POOL` = top
+  5, so a dropped leader leaves replacement material). Runs on both
+  extractive lanes (`claims()` gated by `index` + a streamed `entity`
+  phase); the writer lane (`EXTRACTIVE=0`) doesn't run it — recorded in
+  KNOWN_GAPS. Scoring at chunk level, not quote level: the abstract body
+  resolves what a bare sentence can't, and a wrong-entity chunk can't
+  produce evidence for the named substance at all.
 - **Why a separate call, not a criterion inside `sentence_score`:** asked
   inline ("evidence about the named substance that answers it"), the
   judge trades entity identity off against topical relevance — a
@@ -316,13 +320,19 @@ each is re-derivable from this repo alone.
 - **Measured (golden, v5→v7):** dangerous abstain-answers 2→0 (myrcia→
   myricetin, scopolia→griffonia); refuted-row leaks 2→0 (limonene→
   spirulina, tin→OraCMU — plus unflagged wrong-entity catches:
-  safflower→nigella, capsicum→avocado-soy). Cost: ~3 semantic_verified
-  answers where the evidence exists only under a name the quote can't
-  show (a trial codenamed `ART` — neither the sentence nor its source
-  title names wallflower/arnica). For verbatim quotes, a quote that can't
-  demonstrate its own entity is not evidence — accepted and recorded in
-  `evals/README.md`.
-- **ENTITY_MIN = 0.6, not GROUNDED_MIN 0.7:** same-entity scores sit
-  ≥0.65 when the substance is named but tangential (betaine inside a
-  malnutrition study), wrong-entity ≤0.55 — 0.6 is the demonstrated gap,
-  same tune-on-golden convention as `SENT_MIN`.
+  safflower→nigella, capsicum→avocado-soy, and the adversarial one —
+  arnica→`ART`, which expands to *Artemisia annua* (Arthrem), an
+  art-prefix look-alike the check still rejects at ~0.03). The apparent
+  verified-answer losses were the same class — the eval's own
+  `semantic_verified` labels verify the condition, not the substance
+  (same unanchored-prompt hole; recorded in KNOWN_GAPS).
+- **ENTITY_MIN = 0.6, now distribution-backed:** set from the
+  demonstrated spot-check gap (same-entity ≥0.65, wrong-entity ≤0.55),
+  then confirmed on the v8 3-run golden pass — 1,375 real entity calls:
+  dropped chunks p50 0.02 / max 0.59, kept min 0.60 / p50 0.86. The
+  threshold sits in a measured valley (0.40–0.60 is near-empty), not an
+  assumed one.
+- **Cost:** the gate fires on ~90% of golden questions (108/120) — real
+  questions nearly always carry a rare token, so "rare" can't mean
+  "rarely". Bounded by `ENTITY_POOL` = 5: ≤5 extra judge calls per
+  extraction, chunk-level instead of per-claim.
