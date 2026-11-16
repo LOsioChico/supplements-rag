@@ -25,13 +25,19 @@ QUESTIONS = {
         "type": "choice",
         "instructions": "Classify what the question asks for.",
         "criteria": {
-            "evidence": "any question about a supplement, ingredient, "
-            "herb, or complementary/alternative health intervention "
-            "(acupuncture, massage, music therapy, tai chi...) and its "
-            "effects — including effectiveness, safety, interactions, "
-            "how it works, or simply 'what is X' when X is in scope",
+            "evidence": "an impersonal question about a supplement, "
+            "ingredient, herb, or complementary/alternative health "
+            "intervention (acupuncture, massage, music therapy, tai "
+            "chi...) and its effects — including effectiveness, safety, "
+            "interactions, how it works, or simply 'what is X' when X "
+            "is in scope",
             "advice": "asks for a personal recommendation, a dose, or "
-            "what the asker should take or do for their own body",
+            "what the asker should take or do for their own body — "
+            "including 'should I take X', 'can I take', 'is X safe for "
+            "me', or a supplement alongside the asker's own medication, "
+            "condition, or pregnancy; first-person framing takes "
+            "precedence over evidence even when the question also "
+            "names a substance or interaction",
             "unrelated": "not about supplements, ingredients, or "
             "complementary health interventions at all",
         },

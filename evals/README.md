@@ -17,7 +17,7 @@ evals/
 ├── verify.py            # evidence PMIDs → vllm-sr judge scores → rows file
 ├── eval_pipeline.py     # eval rows → pipeline.answer() → per-row outcomes
 ├── heldout.py           # second stratified draw, disjoint from golden
-├── golden.jsonl         # 120-row stratified eval set (committed — the contract)
+├── golden.jsonl         # 126-row stratified eval set (committed — the contract)
 ├── heldout.jsonl        # 199-row held-out set (committed — measures, never tunes)
 ├── report.json          # retrieval-eval output (regenerable, gitignored)
 ├── pipeline-report*.jsonl  # per-run end-to-end outcomes (vN = named run)
@@ -39,7 +39,7 @@ evidence. Every rejection lands in `rejected.jsonl` with its reason.
 | --- | --- | --- | --- |
 | `answerable` | `answer_with_citations` | MedQuAD info/effective/how-it-works + SuppLLMent positive labels, covered | 1,832 |
 | `negative` | `answer_with_citations` | SuppLLMent `*ineffective_for` labels, covered — cite the no-benefit evidence | 1,561 |
-| `advice` | `answer-or-decline` | MedQuAD dose/interactions/precautions — these are *safety-information* questions (evidence-answerable), not "should I take it": a cited evidence answer is correct, a decline is defensible; the eval records the gate's per-row intent rather than asserting decline | 495 |
+| `advice` | `answer-or-decline` | MedQuAD dose/interactions/precautions — these are *safety-information* questions (evidence-answerable), not "should I take it": a cited evidence answer is correct, a decline is defensible; the eval records the gate's per-row intent rather than asserting decline. Six authored golden rows cover the actual personal class ("should I take X with my meds?") — the only phrasing the gate must decline | 495 |
 | `abstain` | `abstain` | SuppLLMent `insufficient_evidence`, no coverage | 138 |
 
 Rejected (1,543): `no_corpus_coverage` 98 ·
@@ -75,7 +75,8 @@ What the numbers do and don't say:
 - **Advice questions retrieve strong evidence** (BM25 18.66 median) — the
   corpus *can* answer "what's the dose of X", which is exactly why the
   decline contract must fire before evidence reaches the answer. The naive
-  advice-pattern catches 25/25 by construction (qtype vocabulary ⊂ pattern);
+  advice-pattern catches all 31 by construction (MedQuAD qtype vocabulary
+  + authored first-person phrasing are both trivially matchable);
   the real gate test is semantic.
 
 ## End-to-end eval (`evals/eval_pipeline.py` → `evals/pipeline-{report,summary}.json`)
@@ -196,7 +197,8 @@ mass, not at its edge). Raw scores are stored per row so bands can re-derive. `-
 rows a deeper pool (BM25 top-10 + dense top-10) before "no evidence" stands.
 
 **Result on golden:** 33 semantic_verified · 14 semantic_partial ·
-33 semantic_refuted · 40 retrieval_only (abstain/advice carry no evidence).
+33 semantic_refuted · 40 retrieval_only + 6 authored first-person rows
+(abstain/advice carry no evidence to verify).
 
 **Result on the full admitted pool** (`--rows evals/admitted.jsonl
 --verdicts data/verdicts-pool.json`, 9,987 judge calls): of 4,026 rows —
@@ -218,8 +220,8 @@ is a required stage, and refuted rows are kept flagged as hard negatives.
 
 ## Honest limits
 
-- `evidence_pmids` on the 40 abstain/advice rows remain `retrieval_only`
-  by design (no evidence to check). Verified rows carry real support scores,
+- `evidence_pmids` on the 46 abstain/advice rows carry no evidence by
+  design (40 `retrieval_only` + 6 authored first-person rows). Verified rows carry real support scores,
   but the judge is one model — `d3-flash` spot errors are possible; bands
   and the prompt are stated above so the pass is re-runnable.
 - MedQuAD answers are empty by source design — used as question seeds only.
