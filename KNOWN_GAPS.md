@@ -109,7 +109,10 @@ diagram, it should work; if something here gets fixed, delete the line.
   on golden (120 rows × 3 runs at the time, 0 flips), **92%** on the
   199-row held-out set; refuted-refusal 100% / 92%, **0 dangerous answers**.
   Remainder are verify-strictness abstains and unclear-on-verified rows
-  (rescue window vs judge strictness).
+  (rescue window vs judge strictness). Post-worker rerun (126 golden
+  rows incl. the six authored advice rows, ×1): **94%** verified-answered,
+  **97%** refuted-refusal (one refuted row answered — single-row noise at
+  n=33, not yet triaged), **0 dangerous**, 0 flips.
 - Usage/cost ledger: a creatine run logged 61 calls (60 judge + 1 writer),
   `cost_usd` at upstream published rates — judge calls count tokens only
   (`vllm-sr/*` is free research API, no rate published). Pricing is a

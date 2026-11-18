@@ -7,7 +7,7 @@ import { getPlatformProxy } from "wrangler";
 import { createServer } from "node:http";
 
 const PORT = Number(process.env.DENSE_PORT ?? 8779);
-const { env } = await getPlatformProxy();
+const { env } = await getPlatformProxy({ configPath: "worker/wrangler.toml" });
 // same question → same embedding → same hits; cache instead of re-paying
 const cache = new Map();
 

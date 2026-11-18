@@ -15,7 +15,7 @@ const rows = readFileSync(rowsPath, "utf8").trim().split("\n")
 // <rows> --out <queries>` regenerates it.
 const dq = existsSync(dqPath)
   ? JSON.parse(readFileSync(dqPath, "utf8")) : {};
-const { env } = await getPlatformProxy();
+const { env } = await getPlatformProxy({ configPath: "worker/wrangler.toml" });
 
 const vecs = await env.AI.run("@cf/baai/bge-m3",
   { text: rows.map(r => dq[r.id] ?? r.question) });

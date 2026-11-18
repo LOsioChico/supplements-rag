@@ -20,7 +20,7 @@ const todo = chunks.filter((c) => !done.has(c.chunk_id));
 const targets = LIMIT ? todo.slice(0, LIMIT) : todo;
 console.log(`${chunks.length} chunks, ${done.size} done, ${targets.length} to embed`);
 
-const { env } = await getPlatformProxy();
+const { env } = await getPlatformProxy({ configPath: "worker/wrangler.toml" });
 const estTok = (c) => (c.title.length + c.text.length) / 3.5; // chars→tokens
 let embedded = 0;
 
