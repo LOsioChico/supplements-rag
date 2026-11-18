@@ -72,9 +72,7 @@ def test_sentence_scores_batch_one_call_per_source():
 
     extract.claims("does magnesium help sleep", PACK, ask_fn=rec)
     # batched sentence calls ask s0..sN; chunk calls ask a single 'ev'
-    sent_calls = [
-        c for c in calls if all(k[0] == "s" and k[1:].isdigit() for k in c)
-    ]
+    sent_calls = [c for c in calls if all(k[0] == "s" and k[1:].isdigit() for k in c)]
     cands = extract.candidates([(0.9, c) for c in PACK])
     n_groups = len({p for p, _, _ in cands})
     assert len(cands) > n_groups  # the batch actually merges several sentences

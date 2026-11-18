@@ -1,0 +1,17 @@
+[project]
+name = "supplements-rag-worker"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    # the vendored Pyodide httpx fork — jsfetch transport is what sync
+    # calls bridge JS fetch through inside the worker (JSPI)
+    "httpx2",
+    "httpx2-jsfetch",
+]
+
+[dependency-groups]
+dev = [
+    "workers-py",
+    "workers-runtime-sdk",
+]

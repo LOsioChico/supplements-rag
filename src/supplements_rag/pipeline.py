@@ -24,11 +24,12 @@ import os
 import re
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from functools import partial
 from pathlib import Path
 
 from . import contract, extract, gate, generate, judge, verify
+from ._pool import executor
 from .query import retrieve
 
 # USD per 1M tokens for the router's upstream pool (published rates, 2026-11):
@@ -242,7 +243,7 @@ def _check_points(points: list[dict], claims: list[dict], *, ask_fn, key) -> lis
     todo = [(p, cited) for p, cited in todo if cited]
     if not todo:
         return []
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with executor(max_workers=4) as ex:
         futs = [
             ex.submit(_synth_grounded, p["text"], cited, ask_fn=ask_fn, key=key)
             for p, cited in todo
@@ -717,6 +718,7 @@ def answer_events(
     *,
     ask_fn=judge.ask,
     write_fn=generate.write_stream,
+    stream_fn=generate.chat_stream,
     key: str | None = None,
 ):
     """The same pipeline as an event stream — the exhibit path.
@@ -737,7 +739,7 @@ def answer_events(
     ask_fn = partial(ask_fn, usage=usage_log)
     write_fn = partial(
         write_fn,
-        stream_fn=partial(generate.chat_stream, usage=usage_log, stage="write"),
+        stream_fn=partial(stream_fn, usage=usage_log, stage="write"),
     )
     screen = gate.screen(question, ask_fn=ask_fn, key=key)
     yield {"event": "screen", **screen, "ms": _ms(t)}
@@ -818,6 +820,7 @@ def answer_events(
             citations,
             index,
             ask_fn=ask_fn,
+            stream_fn=stream_fn,
             key=key,
             t0=t0,
             usage_log=usage_log,
@@ -836,7 +839,7 @@ def answer_events(
     verdict_done = False
     vs: float | None = None
     errors: list[str] = []
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    with executor(max_workers=6) as ex:
         futs = {}
         for delta in write_fn(question, pack, canary):
             # (kind, text) pairs from write_stream; a bare string is a
@@ -1087,6 +1090,7 @@ def _extractive_events(
     index: dict,
     *,
     ask_fn,
+    stream_fn,
     key,
     t0: float,
     usage_log: list[dict],
@@ -1149,7 +1153,7 @@ def _extractive_events(
     # verdict stays internal — it feeds compose and the status fallback,
     # but the box never renders a line the synthesis will replace
     try:
-        with ThreadPoolExecutor(max_workers=6) as ex:
+        with executor(max_workers=6) as ex:
             vfut = ex.submit(
                 extract.direction_for, question, got, ask_fn=ask_fn, key=key
             )
@@ -1222,9 +1226,7 @@ def _extractive_events(
                     question,
                     obj["claims"],
                     canary,
-                    stream_fn=partial(
-                        generate.chat_stream, usage=usage_log, stage="write"
-                    ),
+                    stream_fn=partial(stream_fn, usage=usage_log, stage="write"),
                     years=_years(citations),
                 ):
                     kind, text = delta if isinstance(delta, tuple) else ("token", delta)

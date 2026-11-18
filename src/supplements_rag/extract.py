@@ -18,9 +18,10 @@ CLI: python -m supplements_rag.extract "does magnesium help sleep" \
 """
 
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 
 from . import judge
+from ._pool import executor
 from .bm25 import entity_tokens
 
 # sentences are only mined from the best-scoring chunks — the rest can't
@@ -142,7 +143,7 @@ def _pool_iter(fn, items, phase):
     the ordered score list."""
     yield (phase, 0, len(items))
     out: dict[int, float] = {}
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    with executor(max_workers=6) as ex:
         futs = {ex.submit(fn, x): i for i, x in enumerate(items)}
         for f in as_completed(futs):
             out[futs[f]] = f.result()
@@ -182,9 +183,11 @@ def _sent_iter(question: str, cands: list[tuple], *, ask_fn, key):
     yield ("sentences", 0, len(cands))
     out: dict[int, float] = {}
     batches = [
-        idxs[s : s + _SENT_BATCH] for idxs in groups.values() for s in range(0, len(idxs), _SENT_BATCH)
+        idxs[s : s + _SENT_BATCH]
+        for idxs in groups.values()
+        for s in range(0, len(idxs), _SENT_BATCH)
     ]
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    with executor(max_workers=6) as ex:
         for f in as_completed([ex.submit(call, b) for b in batches]):
             out |= f.result()
             yield ("sentences", len(out), len(cands))

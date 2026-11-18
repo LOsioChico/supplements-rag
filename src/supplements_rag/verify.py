@@ -14,9 +14,9 @@ check can never produce one.
 """
 
 import re
-from concurrent.futures import ThreadPoolExecutor
 
 from . import judge
+from ._pool import executor
 
 GROUNDED_MIN = 0.7
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
@@ -132,7 +132,7 @@ def grounded(
     """(errors, {claim_index: score}) — a claim is grounded if ANY of its
     cited sources scores >= GROUNDED_MIN. JudgeError propagates (fail closed)."""
     scores, errors = {}, []
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    with executor(max_workers=6) as ex:
         futures = {
             (i, x): ex.submit(
                 claim_score, c["text"], chunks[str(x)], ask_fn=ask_fn, key=key

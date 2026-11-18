@@ -63,10 +63,23 @@ diagram, it should work; if something here gets fixed, delete the line.
 
 ## Not built yet
 
-- Worker deploy layer, D1 schema/loaders, freshness cron
+- Freshness cron — `data/ledger.json` makes re-ingest incremental but nothing
+  schedules it on prod yet
 
 ## Built, verified live (single-question CLI runs — not load-tested)
 
+- Worker deploy (`worker/src/worker.py`, prod `luisosio.dev/sr/v1/ask`):
+  full `answer_events()` contract served over FastAPI/`workers.asgi` —
+  gate → retrieve (D1 BM25 postings + Vectorize dense) → extract →
+  verify → answered, streamed verbatim on prod. Pyodide constraints hit
+  and handled: no sockets (judge/writer over sync `httpx2`), no threads
+  (`_pool.py` serial executor on `emscripten`), lazy app construction
+  (startup memory). Per-ask event log lands in the D1 `runs` table —
+  completed and abandoned runs alike (stub insert at stream start +
+  update on completion; disconnect-tested on prod: a killed stream left
+  the `prepare_begin` stub row, `cold` flag included). Verified live,
+  not load-tested; serial extract/verify makes prod runs slower than
+  local's thread pool.
 - Gate (injection noul + intent choice, `d3-flash`): the advice/evidence
   boundary is person-hood — impersonal safety/interaction asks are
   evidence, first-person framing ("should I take X", "with my meds")

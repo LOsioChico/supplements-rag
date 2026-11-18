@@ -21,4 +21,7 @@ lint.extend-select = ["I", "UP"]
 
 [tool.pyrefly]
 # evals/ scripts import each other as top-level modules (admit, run, verify)
+# worker/ targets the Pyodide runtime — workers/js/pyodide imports don't
+# resolve locally, so it is out of the typecheck scope
 search-path = ["evals"]
+project-excludes = ["worker"]

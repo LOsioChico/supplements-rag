@@ -390,3 +390,44 @@ each is re-derivable from this repo alone.
   $0 (free research/eval tier, quota-limited not dollar-billed). The
   table exists so cost evaluators can compare what the same tokens would
   spend upstream — env override swaps rates when the deployment changes.
+
+## ADR-019: Worker deploy — Pyodide constraints mapped, not worked around
+
+- **Decision:** `worker/src/worker.py` serves the identical
+  `answer_events()` contract as a Python Worker — FastAPI over
+  `workers.asgi`, lazily built (startup memory), same SSE frames the
+  local `serve.py` emits so the exhibit UI needed zero changes.
+- **Storage:** `chunks.jsonl` → D1 `chunks` (one row per chunk),
+  `bm25.json` → D1 `bm25_postings` + `bm25_meta`, vectors already in
+  Vectorize. The 35MB index never ships — a query reads only its own
+  terms' postings. Stopword postings (~17k docs) exceed D1's statement
+  size (`SQLITE_TOOBIG`), so postings shard per term
+  (`PRIMARY KEY (term, shard)`, df duplicated per shard, ~3k pairs a
+  row) and the loader folds each doc's length into its posting pair —
+  no separate giant lens row. `len(DocView)` returns corpus N (idf
+  needs the true document count) while `.items()` yields only docs
+  containing the query's terms — absent docs score 0, so the math is
+  identical to the in-memory index.
+- **Pyodide constraints:** no sockets → judge/writer twins in
+  worker.py call vllm-sr through sync `httpx2` (JS fetch under JS
+  Promise Integration), injected through the same `ask_fn`/`stream_fn`
+  parameters the pipeline already took (`stream_fn` was hardcoded in
+  two places — now injected like `chat_fn`); no threads →
+  `src/supplements_rag/_pool.py` returns a serial executor on
+  `sys.platform == "emscripten"` (ThreadPoolExecutor constructs fine,
+  then `submit()` dies — detection is at the platform, not the
+  exception). Serial keeps `submit`/`as_completed` semantics identical;
+  local keeps the pool.
+- **Traces:** each ask opens with an *awaited* stub insert into the D1
+  `runs` table (the `prepare_begin` event, `cold` flag when the isolate
+  just booted `_META`) — written while the request context is certainly
+  alive, because `wait_until` scheduled after a client disconnect never
+  runs: the runtime cancels the request as hung and drops the scheduled
+  coroutine. Completion `UPDATE`s the same row with the full event log
+  (`INSERT` fallback if no stub exists); a killed stream keeps the stub
+  — an abandoned run is an honest partial row, not silence. Same honesty
+  as `data/runs.jsonl` locally.
+- **Verified live:** prod ask "does magnesium help sleep?" → gate
+  (evidence, injection 0.0002) → retrieve 10 PMIDs → extract → verdict
+  0.785 → `status: answered` with 8 cited claims, 29 model calls,
+  ~9.8s end-to-end, run persisted as `runs.id=6` (24.7KB events).

@@ -2,9 +2,13 @@
 
 Everything here is produced by the pipeline — nothing is committed, nothing is
 hand-edited. **None of these files ship to production as-is:** they are build
-intermediates. At deploy time chunks load into D1 (pmid-keyed rows), the BM25
-postings into a D1 table (term-indexed, per-term lookups), and vectors into
-Vectorize — the worker queries those, never these files.
+intermediates. `worker/scripts/load_d1.mjs` loads them into D1 — `chunks`
+(chunk_id-keyed rows), `bm25_postings` (term-indexed, sharded because stopword
+postings exceed D1's statement cap), `bm25_meta` (corpus stats) — and vectors
+live in Vectorize; the Worker queries those, never these files. A fourth D1
+table, `runs`, is written at runtime not loaded — one row per ask holding the
+full event stream, the prod equivalent of `runs.jsonl` (stub-inserted when the
+stream opens, updated when it ends; abandoned runs keep the stub).
 
 | File | Produced by | Contents |
 | --- | --- | --- |

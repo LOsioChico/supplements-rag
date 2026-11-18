@@ -15,3 +15,7 @@ evals/report.json
 evals/pipeline-report*.jsonl
 evals/pipeline-summary*.json
 evals/*.log
+worker/.d1-parts/
+worker/src/supplements_rag/
+worker/python_modules/
+worker/.venv*

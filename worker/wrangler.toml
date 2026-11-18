@@ -1,0 +1,46 @@
+name = "supplements-rag"
+main = "src/worker.py"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["python_workers"]
+
+# served only through the zone — workers.dev + preview URLs off so the
+# site's WAF rate-limit rule can't be bypassed
+workers_dev = false
+preview_urls = false
+
+# warm path is ~50-260ms CPU, cold-start import burst is the real cost;
+# bounded but not clipping legit asks
+limits = { cpu_ms = 8000 }
+
+ai = { binding = "AI" }
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "supplements-bge-m3"
+remote = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "supplements-rag"
+database_id = "53eff665-3670-40cd-86f1-a7d55f67e5d9"
+migrations_dir = "migrations"
+
+# the site's dev proxy maps /sr/v1/ask → the local server — on prod this
+# worker answers the same paths directly
+[[routes]]
+pattern = "luisosio.dev/sr/v1/*"
+zone_id = "62b389314a9308c2b0956e2f05ec0c82"
+
+[vars]
+VLLM_SR_BASE = "https://app.vllm-sr.ai"
+
+# per-IP burst guard — own namespace so no other zone Worker shares the bucket
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "2"
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+[observability]
+enabled = true
