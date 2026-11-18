@@ -313,6 +313,23 @@ def _ms(t: float) -> int:
     return int((time.monotonic() - t) * 1000)
 
 
+def _window(claims: list[dict], citations: dict) -> dict | None:
+    """Publication-year range over the studies the answer actually cites
+    — 'recent' in a verdict is only as honest as these dates."""
+    ys = sorted(
+        int(citations[str(x)]["year"])
+        for c in claims
+        for x in c["ids"]
+        if (citations.get(str(x)) or {}).get("year", "").isdigit()
+    )
+    return {"min": ys[0], "max": ys[-1]} if ys else None
+
+
+def _years(citations: dict) -> dict:
+    """pmid → year for the writer's quote tags."""
+    return {p: c["year"] for p, c in citations.items() if c.get("year")}
+
+
 def answer(
     question: str,
     dense: list,
@@ -497,6 +514,7 @@ def _answer_out(obj: dict, citations: dict, trace: dict) -> dict:
         "verdict": obj["verdict"],
         "claims": obj["claims"],
         "citations": citations,
+        "window": _window(obj["claims"], citations),
         "trace": trace,
     }
 
@@ -570,7 +588,11 @@ def _extractive_answer(
             try:
                 canary = generate.new_canary()
                 raw2 = generate.summarize(
-                    question, obj["claims"], canary, chat_fn=chat_fn
+                    question,
+                    obj["claims"],
+                    canary,
+                    chat_fn=chat_fn,
+                    years=_years(citations),
                 )
                 if parsed := _synth_obj(raw2, canary):
                     v = parsed["verdict"]
@@ -1036,6 +1058,7 @@ def answer_events(
             "verdict": obj["verdict"],
             "claims": obj["claims"],
             "citations": citations,
+            "window": _window(obj["claims"], citations),
             "errors": errors,
             "failed_claims": _failed_claims(errors),
             "verdict_score": vs,
@@ -1050,6 +1073,7 @@ def answer_events(
         "verdict": obj["verdict"],
         "claims": obj["claims"],
         "citations": citations,
+        "window": _window(obj["claims"], citations),
         "ms": _ms(t0),
     }
 
@@ -1201,6 +1225,7 @@ def _extractive_events(
                     stream_fn=partial(
                         generate.chat_stream, usage=usage_log, stage="write"
                     ),
+                    years=_years(citations),
                 ):
                     kind, text = delta if isinstance(delta, tuple) else ("token", delta)
                     if kind == "think":
@@ -1267,6 +1292,7 @@ def _extractive_events(
         "points": points,
         "claims": obj["claims"],
         "citations": citations,
+        "window": _window(obj["claims"], citations),
         "ms": _ms(t0),
         **synth_meta,
     }

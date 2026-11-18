@@ -25,6 +25,7 @@ $ python -m supplements_rag.pipeline "does creatine help build muscle"
   ],
   "citations": {"41328071": {"title": "Effects of creatine supplementation
     on muscle strength gains — a meta-analysis", "url": "https://pubmed…"}},
+  "window": {"min": 2018, "max": 2024},
   "trace": {
     "screen":   {"intent": "evidence", "injection": 0.0003, "ms": 314},
     "retrieve": {"pack": ["41328071", "…10 PMIDs"], "ms": 22},
@@ -40,7 +41,7 @@ $ python -m supplements_rag.pipeline "does creatine help build muscle"
 }
 ```
 
-Every number must literally appear in its cited source (doses, p-values — checked deterministically), every claim gets a judge support score ≥0.7 (`attempts[].grounded`), and the verdict is checked against the combined evidence. One pass, no rewrite — a failed check marks its sentence on the answer (`unverified`); only unparseable output still abstains. The `trace` carries the whole reasoning: gate intent + injection score, per-stage timings, each attempt's raw output, errors, judge scores, and the run's token ledger (per-model in/out + estimated USD at the upstream providers' published rates; `vllm-sr/*` calls count tokens only — the free research API publishes no rate) — it is the contract the demo streams. (Extractive-lane latency is the judge scoring rounds — chunks, then sentences, then claim stamps; on the opt-in writer lane it's the writer generating the contract, ~1s of checks after.)
+Every number must literally appear in its cited source (doses, p-values — checked deterministically), every claim gets a judge support score ≥0.7 (`attempts[].grounded`), and the verdict is checked against the combined evidence. One pass, no rewrite — a failed check marks its sentence on the answer (`unverified`); only unparseable output still abstains. The `trace` carries the whole reasoning: gate intent + injection score, per-stage timings, each attempt's raw output, errors, judge scores, and the run's token ledger (per-model in/out + estimated USD at the upstream providers' published rates; `vllm-sr/*` calls count tokens only — the free research API publishes no rate) — it is the contract the demo streams. `window` reports the publication-year range of the cited studies, and the writer sees each quote's year — a "recent studies" question gets bounded by the evidence's actual dates instead of echoing the word. (Extractive-lane latency is the judge scoring rounds — chunks, then sentences, then claim stamps; on the opt-in writer lane it's the writer generating the contract, ~1s of checks after.)
 
 ## The finding that shaped the design
 

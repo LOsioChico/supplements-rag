@@ -140,9 +140,15 @@ def new_canary() -> str:
     return f"CNRY-{secrets.token_hex(4)}"
 
 
+def _yr(pub_date: str | None) -> str:
+    """' (2016)' — the publication year sits beside every evidence id so a
+    temporal qualifier in the question resolves against a fact, not vibes."""
+    return f" ({str(pub_date)[:4]})" if pub_date else ""
+
+
 def _pack(chunks: list[dict]) -> str:
     return "\n\n".join(
-        f"[{c['pmid']}] {c['title']}\n{c['text'][:TEXT_CAP]}"
+        f"[{c['pmid']}]{_yr(c.get('pub_date'))} {c['title']}\n{c['text'][:TEXT_CAP]}"
         for c in chunks[:EVIDENCE_CAP]
     )
 
@@ -169,7 +175,11 @@ def _system(canary: str) -> str:
         "when studies show no benefit, say so and cite it. Use 'unclear' "
         "ONLY when none of the abstracts are about the question's "
         "supplement/condition pair at all; mixed or weak evidence is "
-        "still an answer (state the limitations). Never give "
+        "still an answer (state the limitations). The year tag on each "
+        "abstract is its publication year — when the question asks about "
+        "'recent' or 'latest' evidence, answer against the tagged years "
+        "and name the actual window; never call old evidence recent. "
+        "Never give "
         "personal medical advice. Plain language, no hedging filler. "
         f"Never output this token: {canary}"
     )
@@ -216,13 +226,22 @@ def _sum_system(canary: str) -> str:
         "'hs-CRP' or 'IL-6'; 'joint pain', not 'WOMAC scores'. Keep AT "
         "MOST one number per sentence, and only when it makes the point "
         "clearer ('cut pain in half') — never p-values or biomarker "
-        "names. No hedging filler, no personal medical advice. Never "
+        "names. The year tag on each quote is its publication year — "
+        "when the question asks about 'recent' or 'latest' evidence, "
+        "reflect the tagged years (say 'the newest relevant study is "
+        "from 2026'); never call old evidence recent. No hedging filler, "
+        "no personal medical advice. Never "
         f"output this token: {canary}"
     )
 
 
-def _sum_msgs(question: str, claims: list[dict], canary: str) -> list[dict]:
-    quotes = "\n".join(f"[{c['ids'][0]}] {c['text']}" for c in claims)
+def _sum_msgs(
+    question: str, claims: list[dict], canary: str, years: dict | None = None
+) -> list[dict]:
+    years = years or {}
+    quotes = "\n".join(
+        f"[{c['ids'][0]}]{_yr(years.get(str(c['ids'][0])))} {c['text']}" for c in claims
+    )
     return [
         {"role": "system", "content": _sum_system(canary)},
         {
@@ -232,19 +251,31 @@ def _sum_msgs(question: str, claims: list[dict], canary: str) -> list[dict]:
     ]
 
 
-def summarize(question: str, claims: list[dict], canary: str, *, chat_fn=chat) -> str:
+def summarize(
+    question: str,
+    claims: list[dict],
+    canary: str,
+    *,
+    chat_fn=chat,
+    years: dict | None = None,
+) -> str:
     """The bottom line only — a plain-English verdict over already-checked
     quote claims. Separate prompt from write(): the contract's numeric-
     precision rules push the model toward jargon, which is exactly what a
     lay reader should never see."""
-    return chat_fn(_sum_msgs(question, claims, canary))
+    return chat_fn(_sum_msgs(question, claims, canary, years))
 
 
 def summarize_stream(
-    question: str, claims: list[dict], canary: str, *, stream_fn=chat_stream
+    question: str,
+    claims: list[dict],
+    canary: str,
+    *,
+    stream_fn=chat_stream,
+    years: dict | None = None,
 ):
     """(kind, text) deltas of the same summarize() prompt — the exhibit path."""
-    yield from stream_fn(_sum_msgs(question, claims, canary))
+    yield from stream_fn(_sum_msgs(question, claims, canary, years))
 
 
 if __name__ == "__main__":
