@@ -11,6 +11,7 @@ here as a child process; prod does the same calls inline in the Worker.
 import atexit
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -24,6 +25,31 @@ from .pipeline import answer_events
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE: dict = {}
+RUNS_LOG = ROOT / "data" / "runs.jsonl"
+
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
+_PHONE = re.compile(r"\+?\d[\d .()\-]{7,14}\d")
+_URLQ = re.compile(r"(\bhttps?://[^\s?\"']+)\?[^\s\"']*")
+
+
+def _mask(s: str) -> str:
+    return _URLQ.sub(r"\1?<query>", _PHONE.sub("<phone>", _EMAIL.sub("<email>", s)))
+
+
+def _log_run(question: str, events: list[dict]) -> None:
+    """One JSON line per ask — the full event stream is the trace, kept so
+    real runs can be classified (what failed, which stage) and folded back
+    into the golden set. Question text is masked (email/phone/url-query)
+    — it's free visitor input, same privacy contract as traces."""
+    RUNS_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with RUNS_LOG.open("a") as f:
+        f.write(
+            json.dumps(
+                {"ts": time.time(), "q": _mask(question), "events": events},
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
 
 def _load() -> None:
@@ -117,11 +143,14 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(f'data: {{"event": "prepare", "ms": {ms}}}\n\n'.encode())
             self.wfile.flush()
             key = os.environ["VLLM_SR_API_KEY"]
+            events = []
             for ev in answer_events(q, dense, STATE["chunks"], STATE["index"], key=key):
+                events.append(ev)
                 self.wfile.write(
                     f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode()
                 )
                 self.wfile.flush()
+            _log_run(q, events)
         except (BrokenPipeError, ConnectionResetError):
             pass  # client navigated away mid-stream — nothing to repair
         except Exception as e:  # noqa: BLE001 — fail closed: the stream ends with an error event

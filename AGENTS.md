@@ -22,6 +22,8 @@ This is a **public repository** — code and docs must read well to a stranger.
 
 ## Rules
 
+- **The repo stands alone** — never name other projects in code, docs, or
+  commits; a stranger should need no sibling context.
 - **Never commit `.env`** (holds `NCBI_API_KEY`) — gitignored, `.env.example`
   documents the shape.
 - **Never commit `data/`** — corpus + ledger are regenerable; the code is the
