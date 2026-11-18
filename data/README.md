@@ -19,6 +19,7 @@ Vectorize — the worker queries those, never these files.
 | `verdicts-pool.json` | `verify.py --rows evals/admitted.jsonl` | Same, on the full 4,026-row admitted pool (~10k judge calls) |
 | `dense-queries.json` | `query.py --dense-map` | Keyword-form embedding text per eval row (`"information about {kw}"`) — keeps the dense transform single-sourced in Python |
 | `pool-verify*.log` | `verify.py` (stderr) | Pool-pass progress logs — regenerate, ignore |
+| `runs.jsonl` | `serve.py` (runtime, not the pipeline) | One line per visitor ask — the full event stream for completed, crashed, and abandoned runs alike; question text masked |
 
 Measured on the full corpus (17,696 chunks): corpus ≈ 86MB, chunks ≈ 84MB,
 bm25 ≈ 35MB (~2KB/doc — term frequencies dominate), embed-ledger ≈ 190KB.

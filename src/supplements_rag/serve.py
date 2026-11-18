@@ -130,6 +130,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("cache-control", "no-cache")
         self._cors()
         self.end_headers()
+        events: list[dict] = []
         try:
             _load()
             # the dense leg costs seconds (node handoff) — emit a prepare
@@ -142,15 +143,14 @@ class Handler(BaseHTTPRequestHandler):
             ms = round((time.monotonic() - t) * 1000)
             self.wfile.write(f'data: {{"event": "prepare", "ms": {ms}}}\n\n'.encode())
             self.wfile.flush()
+            events.append({"event": "prepare", "ms": ms})
             key = os.environ["VLLM_SR_API_KEY"]
-            events = []
             for ev in answer_events(q, dense, STATE["chunks"], STATE["index"], key=key):
                 events.append(ev)
                 self.wfile.write(
                     f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode()
                 )
                 self.wfile.flush()
-            _log_run(q, events)
         except (BrokenPipeError, ConnectionResetError):
             pass  # client navigated away mid-stream — nothing to repair
         except Exception as e:  # noqa: BLE001 — fail closed: the stream ends with an error event
@@ -161,6 +161,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 pass
+        finally:
+            # disconnects and crashes exit above — logging in finally keeps
+            # abandoned/failed runs in runs.jsonl, not just clean ones
+            _log_run(q, events)
 
     def log_message(self, format: str, *args) -> None:
         sys.stderr.write(f"[serve] {format % args}\n")
