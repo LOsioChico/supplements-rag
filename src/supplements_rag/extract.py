@@ -36,6 +36,11 @@ SENT_MIN = 0.6
 # tuned on the golden slice: 0.6 keeps betaine-in-a-malnutrition-study
 # while griffonia-for-scopolia (0.55) still fails
 ENTITY_MIN = 0.6
+# condition identity is a veto, not a gate: the golden pool's cond-score
+# distribution keeps ~93% of verified chunks at 0.1 (vs 77% at 0.3) while
+# clearly-wrong-condition chunks (fibromyalgia-for-pelvic-pain) sit at
+# <=0.05 — the veto line lives at the bottom edge of legit evidence
+COND_MIN = 0.1
 # entity-check runs on the top-ranked chunks plus a couple of
 # replacement ranks — a dropped leader still leaves quote material
 ENTITY_POOL = 5
@@ -88,14 +93,19 @@ def sentence_score(
     return answers["ev"]["noul"]
 
 
-def entity_score(question: str, chunk: dict, *, ask_fn=judge.ask, key=None) -> float:
-    """noul score: does this SOURCE study the same substance the question
-    names? Scored at chunk level, not sentence level — the abstract body
-    defines what a bare quote can't (a trial codenamed 'ART' names its
-    substance in the full text). A dedicated single-criterion check:
-    folded into question/sentence_score the judge trades identity off
-    against topical relevance (myricetin-for-myrcia scored 0.81 folded
-    into sentence_score, 0.31 as this dedicated check)."""
+def entity_score(
+    question: str, chunk: dict, *, ask_fn=judge.ask, key=None
+) -> tuple[float, float]:
+    """(ev, cond) noul scores: does this SOURCE study the same substance
+    AND the same condition the question names? Scored at chunk level, not
+    sentence level — the abstract body defines what a bare quote can't (a
+    trial codenamed 'ART' names its substance in the full text). A
+    dedicated single-criterion check: folded into question/sentence_score
+    the judge trades identity off against topical relevance
+    (myricetin-for-myrcia scored 0.81 folded into sentence_score, 0.31 as
+    this dedicated check). Same substance, wrong condition is the same
+    failure — a fibromyalgia trial's efficacy quote can't answer for
+    chronic pelvic pain; the second axis drops it."""
     answers = ask_fn(
         f"Source:\n{chunk['title']}\n{chunk['text'][:12000]}\n\nQuestion: {question}",
         {
@@ -107,12 +117,21 @@ def entity_score(question: str, chunk: dict, *, ask_fn=judge.ask, key=None) -> f
                 "thing — including a codename or abbreviation the source "
                 "itself defines. Constituents, derivatives, and related "
                 "compounds are NOT the same substance.",
-            }
+            },
+            "cond": {
+                "type": "noul",
+                "instructions": "Does this source study the same health "
+                "condition, symptom, or outcome the question asks about? "
+                "An established name for the same condition counts; an "
+                "adjacent or parent condition does NOT (fibromyalgia is "
+                "not chronic pelvic pain). Score 1 when the question "
+                "names no specific condition.",
+            },
         },
         key=key,
         stage="extract",
     )
-    return answers["ev"]["noul"]
+    return answers["ev"]["noul"], answers["cond"]["noul"]
 
 
 def candidates(top: list) -> list[tuple]:
@@ -142,7 +161,7 @@ def _pool_iter(fn, items, phase):
     lands (progress drives the streamed lane's `extract` events), returns
     the ordered score list."""
     yield (phase, 0, len(items))
-    out: dict[int, float] = {}
+    out = {}
     with executor(max_workers=6) as ex:
         futs = {ex.submit(fn, x): i for i, x in enumerate(items)}
         for f in as_completed(futs):
@@ -220,9 +239,14 @@ def claims_iter(
             [c for _, c in ranked[:ENTITY_POOL]],
             "entity",
         )
-        passed = [x for x, s in zip(ranked[:ENTITY_POOL], escores) if s >= ENTITY_MIN]
+        passed = [
+            x
+            for x, (ev, cond) in zip(ranked[:ENTITY_POOL], escores)
+            if ev >= ENTITY_MIN and cond >= COND_MIN
+        ]
         if meta is not None:
-            meta["entity_scores"] = escores
+            meta["entity_scores"] = [ev for ev, _ in escores]
+            meta["cond_scores"] = [cond for _, cond in escores]
             meta["entity_dropped"] = len(ranked[:ENTITY_POOL]) - len(passed)
         pool = passed[:TOP_CHUNKS]
     cands = candidates(pool)
@@ -243,7 +267,8 @@ def claims(
     best first, each citing its own PMID. When `index` is given and the
     question names a corpus-rare/absent entity, only chunks the entity
     check confirms can produce quotes — a wrong-entity chunk's sentences
-    can't answer for the named substance (meta collects the scores).
+    can't answer for the named substance, and a same-substance
+    wrong-condition chunk can't either (meta collects both score axes).
     JudgeError propagates: the pipeline fails closed on a judge outage."""
     it = claims_iter(question, pack, index, ask_fn=ask_fn, key=key, meta=meta)
     try:

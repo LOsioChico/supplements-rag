@@ -37,6 +37,13 @@ diagram, it should work; if something here gets fixed, delete the line.
   different substance (claim↔source checks can't see question↔claim
   mismatch). Opt-in path, unexercised by evals — fix lands if the writer
   lane becomes the default again (ADR-016).
+- **Condition axis is a veto, not a gate** — `cond >= 0.1` catches
+  clearly-wrong conditions (the acupuncture-fibromyalgia class:
+  same substance, wrong population) but borderline mismatches in the
+  0.1–0.6 band still pass; verified chunks score mid-band too often for
+  a harder line (measured: 77% kept at 0.3 → unacceptable loss).
+  Mid-band wrong-condition evidence remains a known hole — deeper fix
+  is a question↔source gate on the calibrated valley, not a tighter veto.
 - **The eval's own semantic labels carry the entity hole** —
   `evals/verify.py` asks "does this abstract answer the question" without
   anchoring the substance, so `semantic_verified` partly means "verified
@@ -111,8 +118,11 @@ diagram, it should work; if something here gets fixed, delete the line.
   Remainder are verify-strictness abstains and unclear-on-verified rows
   (rescue window vs judge strictness). Post-worker rerun (126 golden
   rows incl. the six authored advice rows, ×1): **94%** verified-answered,
-  **97%** refuted-refusal (one refuted row answered — single-row noise at
-  n=33, not yet triaged), **0 dangerous**, 0 flips.
+  **97%** refuted-refusal (one refuted row answered — traced to the
+  condition-mismatch hole: real quote, wrong population), **0 dangerous**,
+  0 flips. Post condition-axis rerun (ADR-016 second axis, COND_MIN=0.1):
+  **88%** verified-answered (3 of the losses were transient judge
+  `unavailable`s, not the axis), **100%** refuted-refusal, 0 dangerous.
 - Usage/cost ledger: a creatine run logged 61 calls (60 judge + 1 writer),
   `cost_usd` at upstream published rates — judge calls count tokens only
   (`vllm-sr/*` is free research API, no rate published). Pricing is a

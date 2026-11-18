@@ -66,6 +66,7 @@ def eval_row(i, run, row, dense, chunks, index, key):
                 k: tr["attempts"][-1].get(k)
                 for k in (
                     "entity_scores",
+                    "cond_scores",
                     "entity_dropped",
                     "best_chunk",
                     "grounded",

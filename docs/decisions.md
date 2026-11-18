@@ -346,8 +346,28 @@ each is re-derivable from this repo alone.
   questions nearly always carry a rare token, so "rare" can't mean
   "rarely". Bounded by `ENTITY_POOL` = 5: ≤5 extra judge calls per
   extraction, chunk-level instead of per-claim.
-
-## ADR-017: Non-question inputs — "can this be answered" is part of the score
+- **Second axis, zero extra calls (post-worker):** the same ask carries a
+  `cond` field — "does this source study the same health condition,
+  symptom, or outcome the question asks about? An established name for
+  the same condition counts; an adjacent or parent condition does NOT."
+  The substance axis alone can't catch the sibling mismatch: a golden
+  row asked acupuncture for chronic pelvic pain and was answered verbatim
+  from a real RCT — on acupuncture for **fibromyalgia** (adjacent chronic
+  pain, wrong population; grounded check 0.99 — the claim IS in the
+  source — while `best_chunk` flagged the question↔source gap at 0.34
+  and the eval label said semantic_refuted). Both axes share the gate:
+  `ev >= ENTITY_MIN and cond >= COND_MIN`, dropped chunks recorded as
+  `cond_scores` in the report dump for calibration.
+- **COND_MIN = 0.1 — a veto at the bottom edge, not a gate:** at
+  ENTITY_MIN (0.6) the axis over-fired — verified chunks on golden kept
+  only 77% (verified-answer 94→79%, refuted-refusal 100%) because
+  legit-but-loosely-matching conditions score mid-band. The measured
+  distributions (530 cond calls): verified chunks mass 0.55–0.98,
+  refuted chunks mass ≤0.10 — COND_MIN sits at the bottom edge of the
+  verified tail (0.1: keeps 93% of verified chunks, drops 59% of
+  refuted; the fibromyalgia offenders scored ≤0.05). Re-run: 88%
+  verified-answer (3 transient judge `unavailable`s included),
+  **100%** refuted-refusal, 0 dangerous.
 
 - **Decision:** `question_score` now requires the checked input to be
   an actual question — "only if the checked input is itself a question;
