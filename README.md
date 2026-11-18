@@ -31,18 +31,22 @@ $ python -m supplements_rag.pipeline "does creatine help build muscle"
     "attempts": [{"errors": [], "verdict_score": 0.79, "write_ms": 16745,
                   "verdict_kind": "generated", "ms": 19717,
                   "grounded": {"0:41328071": 0.99, "…each ≥0.7"}}],
+    "usage": {"calls": 61, "in": 21257, "out": 964,
+              "by_model": {"vllm-sr/d3-flash": {"in": 20473, "out": 0},
+                           "deepseek/deepseek-v4.1-flash": {"in": 784, "out": 964}},
+              "unpriced": 60, "cost_usd": 0.000735},
     "ms": 20054
   }
 }
 ```
 
-Every number must literally appear in its cited source (doses, p-values — checked deterministically), every claim gets a judge support score ≥0.7 (`attempts[].grounded`), and the verdict is checked against the combined evidence. One pass, no rewrite — a failed check marks its sentence on the answer (`unverified`); only unparseable output still abstains. The `trace` carries the whole reasoning: gate intent + injection score, per-stage timings, each attempt's raw output, errors, and judge scores — it is the contract the demo streams. (Extractive-lane latency is the judge scoring rounds — chunks, then sentences, then claim stamps; on the opt-in writer lane it's the writer generating the contract, ~1s of checks after.)
+Every number must literally appear in its cited source (doses, p-values — checked deterministically), every claim gets a judge support score ≥0.7 (`attempts[].grounded`), and the verdict is checked against the combined evidence. One pass, no rewrite — a failed check marks its sentence on the answer (`unverified`); only unparseable output still abstains. The `trace` carries the whole reasoning: gate intent + injection score, per-stage timings, each attempt's raw output, errors, judge scores, and the run's token ledger (per-model in/out + estimated USD at the upstream providers' published rates; `vllm-sr/*` calls count tokens only — the free research API publishes no rate) — it is the contract the demo streams. (Extractive-lane latency is the judge scoring rounds — chunks, then sentences, then claim stamps; on the opt-in writer lane it's the writer generating the contract, ~1s of checks after.)
 
 ## The finding that shaped the design
 
 **Coverage ≠ evidence.** BM25 admits eval questions by lexical overlap — and on 4,026 admitted rows, the judge confirmed real evidence for only 24%. **52% of everything that looked covered has no supporting abstract at all.** A system that answers whatever it retrieves fabricates on half its input — so this one verifies every claim before the answer is trusted (streamed deltas render provisional — stamped `checking` — and only the settled answer is gated), and abstains by design.
 
-Measured on the 120-row golden set (tuning set) **and a 199-row held-out set it never saw** (`evals/heldout.jsonl`, disjoint questions — the anti-overfit check):
+Measured on the golden set (126 rows — the tuning set; the v8 numbers below ran at 120, before six authored first-person rows) **and a 199-row held-out set it never saw** (`evals/heldout.jsonl`, disjoint questions — the anti-overfit check):
 
 - **91%** of verified-evidence rows answered with citations (golden, 360 runs across `--repeats 3` — **0 status flips**); held-out: **92%**
 - **100%** of refuted rows safely refused; **0** dangerous answers in 360 runs
@@ -87,7 +91,7 @@ The PubMed query that built the corpus:
 pip install -e .[dev]                  # package + pytest/ruff/pyrefly
 
 # verify the code — no data or network needed
-pytest                                 # 57 tests
+pytest                                 # 60 tests
 ruff check . && ruff format --check . && pyrefly check
 
 # ask a question — needs built data/ + VLLM_SR_API_KEY

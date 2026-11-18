@@ -25,10 +25,98 @@ import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 from pathlib import Path
 
 from . import contract, extract, gate, generate, judge, verify
 from .query import retrieve
+
+# USD per 1M tokens for the router's upstream pool (published rates, 2026-11):
+#   deepseek-v4.1-flash — DeepInfra standard tier
+#   glm-5.3-flash — docs.z.ai official
+#   qwen3.8-27b — Pearl Research
+# vllm-sr/* models (the judge + router itself) run on the free research API —
+# no published rate exists, so they stay unpriced rather than guessed.
+# MODEL_PRICES env overrides the whole table, e.g. '{"m":{"in":0.1,"out":0.2}}'.
+MODEL_PRICES: dict = json.loads(
+    os.environ.get(
+        "MODEL_PRICES",
+        json.dumps(
+            {
+                "deepseek/deepseek-v4.1-flash": {
+                    "in": 0.20,
+                    "cached": 0.006,
+                    "out": 0.60,
+                },
+                "zai/glm-5.3-flash": {"in": 0.15, "cached": 0.03, "out": 0.50},
+                "qwen/qwen3.8-27b": {"in": 0.20, "cached": 0.05, "out": 2.00},
+            }
+        ),
+    )
+)
+
+
+def _row_cost(row: dict, price: dict) -> float:
+    """One ledger row's USD — cached prompt tokens bill at the cached
+    rate, not full input."""
+    cached = row.get("cached") or 0
+    return (
+        ((row.get("in") or 0) - cached) * price.get("in", 0)
+        + cached * price.get("cached", price.get("in", 0))
+        + (row.get("out") or 0) * price.get("out", 0)
+    ) / 1e6
+
+
+def _usage_totals(calls: list[dict]) -> dict:
+    """Run ledger → totals: per-model and per-stage breakdowns + USD cost
+    when MODEL_PRICES names the model — unpriced models count, never
+    estimated."""
+    by_model: dict[str, dict] = {}
+    by_stage: dict[str, dict] = {}
+    unpriced = 0
+    unpriced_tok = 0
+    cost = 0.0
+    for c in calls:
+        m = c.get("model") or "?"
+        b = by_model.setdefault(m, {"calls": 0, "in": 0, "out": 0})
+        s = by_stage.setdefault(
+            c.get("stage") or c.get("fn") or "?",
+            {"calls": 0, "in": 0, "out": 0, "model": m},
+        )
+        b["calls"] += 1
+        b["in"] += c.get("in") or 0
+        b["out"] += c.get("out") or 0
+        s["calls"] += 1
+        s["in"] += c.get("in") or 0
+        s["out"] += c.get("out") or 0
+        if s["model"] != m:
+            s["model"] = "mixed"
+        p = MODEL_PRICES.get(m)
+        if p:
+            cst = _row_cost(c, p)
+            cost += cst
+            b["cost"] = round(b.get("cost", 0) + cst, 6)
+            s["cost"] = round(s.get("cost", 0) + cst, 6)
+        else:
+            unpriced += 1
+            # the free tier's real meter is the provider's daily token
+            # quota (x-quota-tokens-per-day) — sum it so the UI can show
+            # consumption instead of inventing a price
+            unpriced_tok += (c.get("in") or 0) + (c.get("out") or 0)
+    out = {
+        "calls": len(calls),
+        "in": sum(b["in"] for b in by_model.values()),
+        "out": sum(b["out"] for b in by_model.values()),
+        "by_model": by_model,
+        "by_stage": by_stage,
+    }
+    if unpriced:
+        out["unpriced"] = unpriced
+        out["unpriced_tok"] = unpriced_tok
+    if cost:
+        out["cost_usd"] = round(cost, 6)
+    return out
+
 
 ADVICE_DECLINE = (
     "I can share what the research says about supplements, but I can't "
@@ -206,6 +294,7 @@ def _synth_grounded(verdict: str, claims: list[dict], *, ask_fn, key) -> float:
             }
         },
         key=key,
+        stage="verify",
     )
     return answers["sup"]["noul"]
 
@@ -238,9 +327,15 @@ def answer(
     # trace: stage name → {raw scores, ms}; attempts[] holds each try's
     # raw output, contract/verify errors, and its judge scores
     trace: dict = {"attempts": []}
+    # the token ledger — bound once here, it rides the injected-fn
+    # plumbing to every gate/scope/verify/extract/synth call
+    usage_log: list[dict] = []
+    ask_fn = partial(ask_fn, usage=usage_log)
+    chat_fn = partial(chat_fn, usage=usage_log, stage="write")
 
     def done() -> dict:
         trace["ms"] = _ms(t0)
+        trace["usage"] = _usage_totals(usage_log)
         return trace
 
     t = time.monotonic()
@@ -520,6 +615,7 @@ def _extractive_answer(
     out = _answer_out(obj, citations, finish())
     out["points"] = points
     out["direction"] = direction
+    out["verdict_kind"] = att.get("verdict_kind", "typed")
     if errors:
         return {
             "status": "unverified",
@@ -613,14 +709,29 @@ def answer_events(
     """
     t0 = time.monotonic()
     t = t0
+    # the token ledger — bound once, rides the injected-fn plumbing to
+    # every gate/scope/verify/extract/synth/writer call
+    usage_log: list[dict] = []
+    ask_fn = partial(ask_fn, usage=usage_log)
+    write_fn = partial(
+        write_fn,
+        stream_fn=partial(generate.chat_stream, usage=usage_log, stage="write"),
+    )
     screen = gate.screen(question, ask_fn=ask_fn, key=key)
     yield {"event": "screen", **screen, "ms": _ms(t)}
     if screen["injected"]:
-        yield {"event": "status", "status": "refused", "answer": None, "ms": _ms(t0)}
+        yield {
+            "event": "status",
+            "usage": _usage_totals(usage_log),
+            "status": "refused",
+            "answer": None,
+            "ms": _ms(t0),
+        }
         return
     if screen["intent"] == "advice":
         yield {
             "event": "status",
+            "usage": _usage_totals(usage_log),
             "status": "declined",
             "answer": ADVICE_DECLINE,
             "ms": _ms(t0),
@@ -629,6 +740,7 @@ def answer_events(
     if screen["intent"] == "uncertain":
         yield {
             "event": "status",
+            "usage": _usage_totals(usage_log),
             "status": "unavailable",
             "answer": UNAVAILABLE,
             "ms": _ms(t0),
@@ -657,6 +769,7 @@ def answer_events(
         except judge.JudgeError:
             yield {
                 "event": "status",
+                "usage": _usage_totals(usage_log),
                 "status": "unavailable",
                 "answer": UNAVAILABLE,
                 "ms": _ms(t0),
@@ -666,6 +779,7 @@ def answer_events(
         if scope < SCOPE_MIN:
             yield {
                 "event": "status",
+                "usage": _usage_totals(usage_log),
                 "status": "off_topic",
                 "answer": OFF_TOPIC,
                 "ms": _ms(t0),
@@ -684,6 +798,7 @@ def answer_events(
             ask_fn=ask_fn,
             key=key,
             t0=t0,
+            usage_log=usage_log,
         )
         return
 
@@ -749,6 +864,7 @@ def answer_events(
                 except judge.JudgeError as e:
                     yield {
                         "event": "status",
+                        "usage": _usage_totals(usage_log),
                         "status": "unavailable",
                         "answer": UNAVAILABLE,
                         "judge_error": str(e),
@@ -772,6 +888,7 @@ def answer_events(
             except judge.JudgeError as e:
                 yield {
                     "event": "status",
+                    "usage": _usage_totals(usage_log),
                     "status": "unavailable",
                     "answer": UNAVAILABLE,
                     "judge_error": str(e),
@@ -831,6 +948,7 @@ def answer_events(
             except judge.JudgeError as e:
                 yield {
                     "event": "status",
+                    "usage": _usage_totals(usage_log),
                     "status": "unavailable",
                     "answer": UNAVAILABLE,
                     "judge_error": str(e),
@@ -852,6 +970,7 @@ def answer_events(
             except judge.JudgeError as e:
                 yield {
                     "event": "status",
+                    "usage": _usage_totals(usage_log),
                     "status": "unavailable",
                     "answer": UNAVAILABLE,
                     "judge_error": str(e),
@@ -869,6 +988,7 @@ def answer_events(
     if obj is None:
         yield {
             "event": "status",
+            "usage": _usage_totals(usage_log),
             "status": "abstained",
             "answer": ABSTAIN,
             "errors": errors,
@@ -877,11 +997,18 @@ def answer_events(
         }
         return
     if obj["status"] == "refused":
-        yield {"event": "status", "status": "refused", "answer": None, "ms": _ms(t0)}
+        yield {
+            "event": "status",
+            "usage": _usage_totals(usage_log),
+            "status": "refused",
+            "answer": None,
+            "ms": _ms(t0),
+        }
         return
     if obj["status"] == "unclear":
         yield {
             "event": "status",
+            "usage": _usage_totals(usage_log),
             "status": "unclear",
             "answer": ABSTAIN,
             "missing": obj["missing"],
@@ -903,6 +1030,7 @@ def answer_events(
         # 'unverified', not hidden behind a rewrite
         yield {
             "event": "status",
+            "usage": _usage_totals(usage_log),
             "status": "unverified",
             "answer": answer_text,
             "verdict": obj["verdict"],
@@ -916,6 +1044,7 @@ def answer_events(
         return
     yield {
         "event": "status",
+        "usage": _usage_totals(usage_log),
         "status": "answered",
         "answer": answer_text,
         "verdict": obj["verdict"],
@@ -936,12 +1065,14 @@ def _extractive_events(
     ask_fn,
     key,
     t0: float,
+    usage_log: list[dict],
 ):
     """The extractive lane as events — same contract as the writer path
     minus token/think (no writer runs): extract ×2 → verdict → claim →
     claim_stamp → attempt → status."""
     unavailable = {
         "event": "status",
+        "usage": _usage_totals(usage_log),
         "status": "unavailable",
         "answer": UNAVAILABLE,
     }
@@ -982,6 +1113,7 @@ def _extractive_events(
         }
         yield {
             "event": "status",
+            "usage": _usage_totals(usage_log),
             "status": "unclear",
             "answer": ABSTAIN,
             "missing": extract.compose([])["missing"],
@@ -1062,7 +1194,14 @@ def _extractive_events(
             try:
                 canary = generate.new_canary()
                 buf2 = ""
-                for delta in generate.summarize_stream(question, obj["claims"], canary):
+                for delta in generate.summarize_stream(
+                    question,
+                    obj["claims"],
+                    canary,
+                    stream_fn=partial(
+                        generate.chat_stream, usage=usage_log, stage="write"
+                    ),
+                ):
                     kind, text = delta if isinstance(delta, tuple) else ("token", delta)
                     if kind == "think":
                         yield {"event": "think", "text": text.replace(canary, "…")}
@@ -1134,13 +1273,19 @@ def _extractive_events(
     if errors:
         yield {
             "event": "status",
+            "usage": _usage_totals(usage_log),
             "status": "unverified",
             **base,
             "errors": errors,
             "failed_claims": _failed_claims(errors),
         }
         return
-    yield {"event": "status", "status": "answered", **base}
+    yield {
+        "event": "status",
+        "usage": _usage_totals(usage_log),
+        "status": "answered",
+        **base,
+    }
 
 
 def main() -> None:

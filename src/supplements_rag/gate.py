@@ -48,7 +48,7 @@ QUESTIONS = {
 def screen(question: str, *, ask_fn=judge.ask, key: str | None = None) -> dict:
     """{intent, injection} — injection ≥ threshold or intent=advice → stop."""
     try:
-        answers = ask_fn(question, QUESTIONS, key=key)
+        answers = ask_fn(question, QUESTIONS, key=key, stage="gate")
     except judge.JudgeError:
         # Gate outage ≠ a pass: return 'uncertain' and let the caller decide
         # (pipeline fails closed on an unverifiable screen).

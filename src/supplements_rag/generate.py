@@ -28,6 +28,24 @@ class GenerateError(Exception):
     pass
 
 
+def _usage_row(fn: str, model: str | None, u: dict, stage: str | None = None) -> dict:
+    """Endpoint usage object → ledger row ({fn, model, in, out, ...})."""
+    row = {
+        "fn": fn,
+        "stage": stage,
+        "model": model,
+        "in": u.get("prompt_tokens"),
+        "out": u.get("completion_tokens"),
+    }
+    det = u.get("completion_tokens_details") or {}
+    if det.get("reasoning_tokens"):
+        row["reasoning"] = det["reasoning_tokens"]
+    det = u.get("prompt_tokens_details") or {}
+    if det.get("cached_tokens"):
+        row["cached"] = det["cached_tokens"]
+    return row
+
+
 def _post(messages: list[dict], *, key: str | None, stream: bool, model: str = MODEL):
     return urllib.request.Request(
         f"{BASE}/v1/chat/completions",
@@ -40,6 +58,7 @@ def _post(messages: list[dict], *, key: str | None, stream: bool, model: str = M
                 "max_tokens": 8000,
                 "temperature": 0,
                 "stream": stream,
+                "stream_options": {"include_usage": True} if stream else None,
             }
         ).encode(),
         headers={
@@ -55,22 +74,37 @@ def chat(
     key: str | None = None,
     model: str = MODEL,
     timeout: float = 90,
+    usage: list[dict] | None = None,
+    stage: str | None = None,
 ) -> str:
     try:
         with urllib.request.urlopen(
             _post(messages, key=key, stream=False, model=model), timeout=timeout
         ) as r:
-            return json.loads(r.read())["choices"][0]["message"]["content"]
+            body = json.loads(r.read())
+        if usage is not None and body.get("usage"):
+            usage.append(
+                _usage_row("chat", body.get("model") or model, body["usage"], stage)
+            )
+        return body["choices"][0]["message"]["content"]
     except Exception as e:
         raise GenerateError(str(e)) from e
 
 
-def chat_stream(messages: list[dict], *, key: str | None = None, timeout: float = 90):
+def chat_stream(
+    messages: list[dict],
+    *,
+    key: str | None = None,
+    timeout: float = 90,
+    usage: list[dict] | None = None,
+    stage: str | None = None,
+):
     """(kind, text) deltas as they arrive — the exhibit path. kind is
     "token" for contract content and "think" for the router's reasoning
     stream (it can't be disabled server-side; surfacing it turns the
     dead wait into something a visitor can watch). The buffered chat()
     above is the strict path (nothing reaches the user before verify)."""
+    model = None
     try:
         with urllib.request.urlopen(
             _post(messages, key=key, stream=True), timeout=timeout
@@ -82,7 +116,16 @@ def chat_stream(messages: list[dict], *, key: str | None = None, timeout: float 
                 data = line[5:].strip()
                 if data == "[DONE]":
                     return
-                delta = json.loads(data)["choices"][0].get("delta", {})
+                d = json.loads(data)
+                model = model or d.get("model")
+                if not d.get("choices"):
+                    # the include_usage tail chunk — the call's bill
+                    if usage is not None and d.get("usage"):
+                        usage.append(
+                            _usage_row("chat_stream", model, d["usage"], stage)
+                        )
+                    continue
+                delta = d["choices"][0].get("delta", {})
                 if t := delta.get("reasoning"):
                     yield ("think", t)
                 elif c := delta.get("content"):

@@ -372,3 +372,21 @@ each is re-derivable from this repo alone.
   (both under SCOPE_MIN 0.4 → `off_topic`); control question on the
   same chunk 0.93 — real questions unaffected. 60 tests, ruff,
   pyrefly clean.
+
+## ADR-018: Run usage ledger — every model call counted, priced only at published rates
+
+- **Decision:** both entry points (`answer()`, `answer_events()`) open a
+  `usage_log` bound once onto the injected `ask_fn`/`chat_fn`/`stream_fn` —
+  every gate, scope, verify, extract, synth, and writer call appends
+  `{fn, model, in, out, cached?, reasoning?}`. `trace.usage` (buffered) and
+  the terminal `status` event (streamed) carry the totals.
+- **Pricing:** `MODEL_PRICES` defaults to the router's upstream pool at
+  published rates (deepseek-v4.1-flash → DeepInfra, glm-5.3-flash →
+  docs.z.ai, qwen3.8-27b → Pearl Research, 2026-11); cached prompt tokens
+  bill at the cached rate, not full input. `vllm-sr/*` models — the judge
+  and the router itself — run on the free research API, publish no rate,
+  and count as `unpriced` rather than get an invented number.
+- **Why defaults, not a service:** the deployment's real cost today is
+  $0 (free research/eval tier, quota-limited not dollar-billed). The
+  table exists so cost evaluators can compare what the same tokens would
+  spend upstream — env override swaps rates when the deployment changes.

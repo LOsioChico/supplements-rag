@@ -61,6 +61,7 @@ def question_score(question: str, chunk: dict, *, ask_fn=judge.ask, key=None) ->
             }
         },
         key=key,
+        stage="extract",
     )
     return answers["ev"]["noul"]
 
@@ -81,6 +82,7 @@ def sentence_score(
             }
         },
         key=key,
+        stage="extract",
     )
     return answers["ev"]["noul"]
 
@@ -107,6 +109,7 @@ def entity_score(question: str, chunk: dict, *, ask_fn=judge.ask, key=None) -> f
             }
         },
         key=key,
+        stage="extract",
     )
     return answers["ev"]["noul"]
 
@@ -147,6 +150,47 @@ def _pool_iter(fn, items, phase):
     return [out[i] for i in range(len(items))]
 
 
+# sentences sharing a source ride one judge call as typed questions
+# (was: one call per sentence); cap bounds the per-call question count
+_SENT_BATCH = 15
+
+
+def _sent_iter(question: str, cands: list[tuple], *, ask_fn, key):
+    """_pool_iter for the sentences phase, batched per source chunk."""
+    groups: dict[str, list[int]] = {}
+    for i, (pmid, _, _) in enumerate(cands):
+        groups.setdefault(pmid, []).append(i)
+
+    def call(idxs):
+        title = cands[idxs[0]][1]
+        answers = ask_fn(
+            f"Source: {title}\n\nQuestion: {question}",
+            {
+                f"s{j}": {
+                    "type": "noul",
+                    "instructions": "Does this sentence provide evidence "
+                    f"that answers this question: {question}\n\n"
+                    f"Sentence: {cands[i][2]}",
+                }
+                for j, i in enumerate(idxs)
+            },
+            key=key,
+            stage="extract",
+        )
+        return {i: answers[f"s{j}"]["noul"] for j, i in enumerate(idxs)}
+
+    yield ("sentences", 0, len(cands))
+    out: dict[int, float] = {}
+    batches = [
+        idxs[s : s + _SENT_BATCH] for idxs in groups.values() for s in range(0, len(idxs), _SENT_BATCH)
+    ]
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for f in as_completed([ex.submit(call, b) for b in batches]):
+            out |= f.result()
+            yield ("sentences", len(out), len(cands))
+    return [out[i] for i in range(len(cands))]
+
+
 def claims_iter(
     question: str,
     pack: list[dict],
@@ -179,11 +223,7 @@ def claims_iter(
             meta["entity_dropped"] = len(ranked[:ENTITY_POOL]) - len(passed)
         pool = passed[:TOP_CHUNKS]
     cands = candidates(pool)
-    sscores = yield from _pool_iter(
-        lambda t: sentence_score(question, t[2], t[1], ask_fn=ask_fn, key=key),
-        cands,
-        "sentences",
-    )
+    sscores = yield from _sent_iter(question, cands, ask_fn=ask_fn, key=key)
     return keep(cands, sscores), best
 
 
@@ -249,6 +289,7 @@ def direction_for(
             }
         },
         key=key,
+        stage="extract",
     )
     return answers["dir"].get("choice") or ""
 

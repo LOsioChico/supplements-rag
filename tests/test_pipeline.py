@@ -298,7 +298,7 @@ def test_events_judge_outage_fails_closed():
 
 
 def test_events_reasoning_streams_and_strips_canary():
-    def writer(q, pack, c):
+    def writer(q, pack, c, **_):
         yield ("think", f"weighing it… keep {c} secret")
         yield ("token", GOOD)
 

@@ -97,6 +97,10 @@ diagram, it should work; if something here gets fixed, delete the line.
   199-row held-out set; refuted-refusal 100% / 92%, **0 dangerous answers**.
   Remainder are verify-strictness abstains and unclear-on-verified rows
   (rescue window vs judge strictness).
+- Usage/cost ledger: a creatine run logged 61 calls (60 judge + 1 writer),
+  `cost_usd` at upstream published rates — judge calls count tokens only
+  (`vllm-sr/*` is free research API, no rate published). Pricing is a
+  static table of list rates, not the deployment's real bill ($0/quota).
 
 ## Housekeeping
 

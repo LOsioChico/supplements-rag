@@ -4,7 +4,7 @@ from supplements_rag import extract, judge
 
 
 def _ask(score):
-    def fn(text, questions, *, key=None):
+    def fn(text, questions, **_):
         return {k: {"noul": score} for k in questions}
 
     return fn
@@ -23,10 +23,19 @@ PACK = [
 
 
 def test_claims_returns_verbatim_sentences_over_threshold():
-    def by_content(text, questions, *, key=None):
-        # the answer-bearing sentence scores; filler does not
-        s = 0.9 if "significantly improved" in text else 0.1
-        return {k: {"noul": s} for k in questions}
+    def by_content(text, questions, **kwargs):
+        # the answer-bearing sentence scores; filler does not — sentence
+        # text rides in the batch question's instructions, chunk text in
+        # the prompt
+        return {
+            k: {
+                "noul": 0.9
+                if "significantly improved" in text
+                or "significantly improved" in q.get("instructions", "")
+                else 0.1
+            }
+            for k, q in questions.items()
+        }
 
     got, best = extract.claims("does magnesium help sleep", PACK, ask_fn=by_content)
     assert best == 0.9  # chunk scores all read the same stub
@@ -51,12 +60,33 @@ def test_claims_empty_when_nothing_scores():
     assert got == [] and best == 0.1
 
 
+def test_sentence_scores_batch_one_call_per_source():
+    # a chunk's candidate sentences ride ONE judge call as typed questions —
+    # 2 chunks × their sentences → 2 sentence calls (plus 2 chunk calls),
+    # not 2 + len(sentences)
+    calls = []
+
+    def rec(text, questions, **_):
+        calls.append(questions)
+        return {k: {"noul": 0.9} for k in questions}
+
+    extract.claims("does magnesium help sleep", PACK, ask_fn=rec)
+    # batched sentence calls ask s0..sN; chunk calls ask a single 'ev'
+    sent_calls = [
+        c for c in calls if all(k[0] == "s" and k[1:].isdigit() for k in c)
+    ]
+    cands = extract.candidates([(0.9, c) for c in PACK])
+    n_groups = len({p for p, _, _ in cands})
+    assert len(cands) > n_groups  # the batch actually merges several sentences
+    assert len(sent_calls) == n_groups  # one call per source, not per sentence
+
+
 def _entity_routed(entity_map, default=0.9):
     """Stub that answers every score 0.9 EXCEPT entity_score, whose
     'same substance' instruction routes to the per-chunk map — the
     mechanism under test, everything else held at a passing score."""
 
-    def fn(text, questions, *, key=None):
+    def fn(text, questions, *, key=None, **_):
         out: dict = {}
         for k, q in questions.items():
             if q["type"] == "choice":
@@ -117,7 +147,7 @@ def test_compose_unclear_names_what_is_missing():
 
 
 def test_verdict_for_maps_choice_to_bottom_line():
-    def fn(text, questions, *, key=None):
+    def fn(text, questions, **_):
         return {"dir": {"choice": "supports"}}
 
     assert (
@@ -127,7 +157,7 @@ def test_verdict_for_maps_choice_to_bottom_line():
 
 
 def test_verdict_for_covers_non_yesno_questions():
-    def fn(text, questions, *, key=None):
+    def fn(text, questions, **_):
         return {"dir": {"choice": "speaks"}}
 
     v = extract.verdict_for("what is x", [{"text": "q", "ids": ["1"]}], ask_fn=fn)
@@ -135,7 +165,7 @@ def test_verdict_for_covers_non_yesno_questions():
 
 
 def test_judge_error_propagates():
-    def boom(text, questions, *, key=None):
+    def boom(text, questions, **_):
         raise judge.JudgeError("down")
 
     try:

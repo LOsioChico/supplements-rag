@@ -121,6 +121,7 @@ def claim_score(claim: str, chunk: dict, *, ask_fn=judge.ask, key=None) -> float
             }
         },
         key=key,
+        stage="verify",
     )
     return answers["sup"]["noul"]
 

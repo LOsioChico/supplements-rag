@@ -31,8 +31,14 @@ def ask(
     base: str = BASE,
     model: str = MODEL,
     timeout: float = 30,
+    usage: list[dict] | None = None,
+    stage: str | None = None,
 ) -> dict:
-    """Returns {question_key: answer_dict}. Raises JudgeError on failure."""
+    """Returns {question_key: answer_dict}. Raises JudgeError on failure.
+    `usage` is the run's token ledger — each successful call appends
+    {fn, model, in, out} so a run's cost is auditable, not assumed;
+    `stage` names which pipeline step made the call (gate, extract,
+    verify…) so the ledger can break a run down per stage."""
     payload = {"model": model, "state": state, "questions": questions}
     # the endpoint rate-limits bursts (verify fans out per claim, the
     # extract lane per sentence) — 429s are transient, so retry with
@@ -49,7 +55,19 @@ def ask(
         )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                answers = json.loads(r.read()).get("answers")
+                body = json.loads(r.read())
+            answers = body.get("answers")
+            if usage is not None:
+                u = body.get("usage") or {}
+                usage.append(
+                    {
+                        "fn": "systemone",
+                        "stage": stage,
+                        "model": body.get("model") or model,
+                        "in": u.get("input_tokens"),
+                        "out": u.get("output_tokens"),
+                    }
+                )
             break
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < 3:
