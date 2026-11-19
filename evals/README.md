@@ -55,6 +55,12 @@ the label says insufficient — needs review, not silent admission).
 | abstain | 15 | — | — | 9.63 | 4.70–11.98 | 0.44 |
 | advice | 25 | — | — | 18.74 | 11.13–29.65 | 0.49 |
 
+*(`n` reflects the 120-row golden; the set now has 126 rows and 14 MedQuAD
+interaction questions moved advice→abstain — the corpus holds no herb-drug
+interaction evidence, so abstention was the correct outcome, not
+over-caution. Current split: answerable 50, negative 30, abstain 29,
+advice 17.)*
+
 *(2026-11 rerun: production-path eval — `retrieve()` incl. rare-entity
 injection, keyword-form dense queries; negative@5 dipped 1.00→0.93 as
 injected entity chunks take top-5 slots — proposed evidence still lands

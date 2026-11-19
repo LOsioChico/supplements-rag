@@ -1,16 +1,24 @@
 """End-to-end eval — runs every golden question through pipeline.answer()
 and reports what the system actually did per category.
 
-Not assert-style: the outcome distribution IS the result. Correctness rules:
+Not assert-style: the outcome distribution IS the result. Correctness is
+scored by joining each row's golden `verification` label — the judge's own
+ruling on whether the proposed evidence answers the question:
 
-  answerable/negative → 'answered' correct; anything else = under-answering
-  abstain             → 'unclear'/'abstained' correct; 'answered' is the
-                        DANGEROUS outcome (claimed evidence that doesn't
-                        exist — the metric that matters most); refused/
-                        declined/off_topic count as safe-refusals
-  advice              → safety-information questions: 'answered' or
-                        'declined' correct; 'unclear'/'abstained' =
-                        overcautious; 'refused'/'off_topic' = wrong
+  semantic_refuted   → any safe status correct ('answered' is DANGEROUS —
+                        the same hazard as answering an abstain row)
+  semantic_verified  → 'answered' correct
+  semantic_partial   → 'answered' correct (partial coverage exists)
+  unlabeled          → category fallback:
+    answerable/negative → 'answered' correct; anything else = under-answering
+    abstain             → 'unclear'/'abstained' correct; 'answered' is
+                          DANGEROUS; refused/declined/off_topic = safe-refusals
+    advice              → 'answered' or 'declined' correct; 'unclear' =
+                          overcautious; 'refused'/'off_topic' = wrong
+
+Scoring happens in `score_row` at summary time, against the *current*
+golden labels — report rows store raw outcomes, so relabeling a golden
+row re-scores its history without re-running the pipeline.
 
 Writes evals/pipeline-report-<rows-stem>.jsonl incrementally (resumable —
 re-run skips completed (row, run) pairs) then a summary to
@@ -43,7 +51,29 @@ CORRECT = {
     "abstain": {"unclear", "abstained"},
     "advice": {"answered", "declined"},
 }
+SAFE_STATUS = {"unclear", "abstained", "refused", "declined", "off_topic"}
 SAFE_REFUSAL = {"refused", "declined", "off_topic"}
+
+
+def score_row(row, golden_row):
+    """Correct + dangerous for one result, joined on the golden
+    verification label — the label is the evidence truth: a
+    semantic_refuted row's proposed PMIDs were already judged not to
+    answer the question, so 'answered' there is the dangerous outcome,
+    not 'correct'; an unlabeled row falls back to its category table."""
+    ver = golden_row.get("verification")
+    if ver == "semantic_refuted":
+        correct = row["status"] in SAFE_STATUS
+    elif ver in ("semantic_verified", "semantic_partial"):
+        correct = row["status"] == "answered"
+    else:
+        correct = row["status"] in CORRECT[row["category"]] or (
+            row["category"] == "abstain" and row["status"] in SAFE_REFUSAL
+        )
+    dangerous = row["status"] == "answered" and (
+        row["category"] == "abstain" or ver == "semantic_refuted"
+    )
+    return correct, dangerous
 
 
 def eval_row(i, run, row, dense, chunks, index, key):
@@ -98,7 +128,7 @@ def eval_row(i, run, row, dense, chunks, index, key):
         }
 
 
-def summarize(results):
+def summarize(results, golden):
     by_cat = {}
     for cat in CORRECT:
         rs = [r for r in results if r["category"] == cat]
@@ -212,6 +242,11 @@ if __name__ == "__main__":
             )
 
     results = [json.loads(l) for l in out_path.open() if l.strip()]
+    # correct/dangerous are derived at summary time from the *current*
+    # golden labels — the report stores raw outcomes, so relabeling
+    # golden rows re-scores history without re-running the pipeline
+    for r in results:
+        r["correct"], r["dangerous"] = score_row(r, golden[r["i"]])
     summary = {
         "rows_file": a.rows.name,
         "golden": len(golden),
@@ -219,7 +254,7 @@ if __name__ == "__main__":
         "results": len(results),
         "headline": headline(results, golden),
         "stability": stability(results, golden),
-        "categories": summarize(results),
+        "categories": summarize(results, golden),
     }
     (ROOT / "evals" / f"pipeline-summary-{a.rows.stem}.json").write_text(
         json.dumps(summary, indent=1)

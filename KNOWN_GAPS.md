@@ -126,6 +126,16 @@ diagram, it should work; if something here gets fixed, delete the line.
   0 flips. Post condition-axis rerun (ADR-016 second axis, COND_MIN=0.1):
   **88%** verified-answered (3 of the losses were transient judge
   `unavailable`s, not the axis), **100%** refuted-refusal, 0 dangerous.
+  Category scoring now joins the verification labels (`score_row` in
+  eval_pipeline.py — a `semantic_refuted` row that answers is DANGEROUS,
+  whatever its category): abstain **29/29**, advice **17/17**, answerable
+  **41/50**, negative **26/30**, 0 dangerous. 14 MedQuAD interaction
+  questions moved advice→abstain — the corpus carries no herb-drug
+  interaction evidence at all, so `unclear` was honest abstention, not
+  over-caution (every "interaction" corpus match was a statistical
+  time×treatment artifact). Remaining real weakness: `semantic_partial`
+  rows — partial coverage exists but the extractive lane still abstains
+  (partial_answer_rate 0.36); 3 transient `unavailable`s under burst.
 - Usage/cost ledger: a creatine run logged 61 calls (60 judge + 1 writer),
   `cost_usd` at upstream published rates — judge calls count tokens only
   (`vllm-sr/*` is free research API, no rate published). Pricing is a
