@@ -97,6 +97,7 @@ def eval_row(i, run, row, dense, chunks, index, key):
                 for k in (
                     "entity_scores",
                     "cond_scores",
+                    "has_cond_scores",
                     "entity_dropped",
                     "best_chunk",
                     "grounded",

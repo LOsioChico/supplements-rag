@@ -368,8 +368,21 @@ each is re-derivable from this repo alone.
   refuted; the fibromyalgia offenders scored ≤0.05). Re-run: 88%
   verified-answer (3 transient judge `unavailable`s included),
   **100%** refuted-refusal, 0 dangerous.
-
-- **Decision:** `question_score` now requires the checked input to be
+- **Third field `has_cond` — the veto only exists when a condition is
+  named:** 'Score 1 when the question names no specific condition'
+  doesn't hold — definitional asks ('What is Capsicum?', 'How does
+  Iodine work?') score cond 0.12–0.58 anyway: the judge anchors on the
+  study's own population. The same ask now carries `has_cond` ("does
+  the question name a specific health condition, symptom, or
+  outcome?"). Measured separation: definitional asks 0.04–0.39,
+  conditional asks 0.85–0.89 → `HAS_COND_MIN = 0.5`, and the gate
+  becomes `ev >= ENTITY_MIN and (has_cond < 0.5 or cond >= COND_MIN)` —
+  below 0.5 the cond axis is undefined and cannot veto. Golden rerun:
+  zero has_cond-driven status changes (the definitional rows' chunks
+  already scored cond ≥0.1 — the fix removes a wrong-condition veto
+  path, it doesn't rescue golden rows); verified-answer 94%, refuted-
+  refusal 100%, 0 dangerous. `has_cond_scores` dumps beside
+  `cond_scores` for the report.
   an actual question — "only if the checked input is itself a question;
   evidence cannot answer something that is not one". The invariant lives
   in the answerability score itself — one place, no input-shape list.

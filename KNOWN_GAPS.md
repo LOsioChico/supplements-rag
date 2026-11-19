@@ -39,11 +39,15 @@ diagram, it should work; if something here gets fixed, delete the line.
   lane becomes the default again (ADR-016).
 - **Condition axis is a veto, not a gate** — `cond >= 0.1` catches
   clearly-wrong conditions (the acupuncture-fibromyalgia class:
-  same substance, wrong population) but borderline mismatches in the
-  0.1–0.6 band still pass; verified chunks score mid-band too often for
-  a harder line (measured: 77% kept at 0.3 → unacceptable loss).
-  Mid-band wrong-condition evidence remains a known hole — deeper fix
-  is a question↔source gate on the calibrated valley, not a tighter veto.
+  same substance, wrong population) and only fires when the question
+  names a condition — `has_cond < 0.5` skips it (definitional asks
+  otherwise ate undefined-axis noise: measured cond 0.12–0.58 on
+  'What is Capsicum?'). Borderline mismatches in the 0.1–0.6 band
+  still pass on condition-naming questions; verified chunks score
+  mid-band too often for a harder line (measured: 77% kept at 0.3 →
+  unacceptable loss). Mid-band wrong-condition evidence remains a
+  known hole — deeper fix is a question↔source gate on the
+  calibrated valley, not a tighter veto.
 - **The eval's own semantic labels carry the entity hole** —
   `evals/verify.py` asks "does this abstract answer the question" without
   anchoring the substance, so `semantic_verified` partly means "verified

@@ -137,8 +137,8 @@ golden labels are coverage-based, not evidence-confirmed:
 flips** — every golden row produced the same outcome all three runs.
 Score-level variance exists under the hood, but no row sits near enough
 to a decision boundary to flip — the thresholds have real margins. The
-run also dumps per-row `scores` (`entity_scores`, `grounded`,
-`synth_score`, `best_chunk`) into the report, so judge-call thresholds
+run also dumps per-row `scores` (`entity_scores`, `cond_scores`,
+`has_cond_scores`, `grounded`, `synth_score`, `best_chunk`) into the report, so judge-call thresholds
 now calibrate on real distributions instead of spot checks: across
 1,375 `entity_score` calls, dropped chunks sit p50 0.02 / max 0.59 and
 kept chunks min 0.60 / p50 0.86 — `ENTITY_MIN=0.6` sits in a genuine

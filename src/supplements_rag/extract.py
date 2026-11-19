@@ -44,6 +44,9 @@ COND_MIN = 0.1
 # entity-check runs on the top-ranked chunks plus a couple of
 # replacement ranks — a dropped leader still leaves quote material
 ENTITY_POOL = 5
+# below this the question names no condition and cond must not veto —
+# measured split: definitional 0.04-0.39, conditional 0.85-0.89
+HAS_COND_MIN = 0.5
 # sentence ends only before a capital/digit — 'L. acidophilus', 'et al.',
 # 'vs.' stay inside their sentence so quotes don't shatter mid-name
 _SENT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
@@ -95,9 +98,10 @@ def sentence_score(
 
 def entity_score(
     question: str, chunk: dict, *, ask_fn=judge.ask, key=None
-) -> tuple[float, float]:
-    """(ev, cond) noul scores: does this SOURCE study the same substance
-    AND the same condition the question names? Scored at chunk level, not
+) -> tuple[float, float, float]:
+    """(ev, cond, has_cond) noul scores: does this SOURCE study the same
+    substance AND the same condition the question names — and does the
+    question name a condition at all? Scored at chunk level, not
     sentence level — the abstract body defines what a bare quote can't (a
     trial codenamed 'ART' names its substance in the full text). A
     dedicated single-criterion check: folded into question/sentence_score
@@ -105,7 +109,10 @@ def entity_score(
     (myricetin-for-myrcia scored 0.81 folded into sentence_score, 0.31 as
     this dedicated check). Same substance, wrong condition is the same
     failure — a fibromyalgia trial's efficacy quote can't answer for
-    chronic pelvic pain; the second axis drops it."""
+    chronic pelvic pain; the second axis drops it. The third gates it:
+    cond is undefined on condition-free questions (the judge anchors on
+    the study's population and scores mid-band anyway), so has_cond
+    decides whether the veto applies at all."""
     answers = ask_fn(
         f"Source:\n{chunk['title']}\n{chunk['text'][:12000]}\n\nQuestion: {question}",
         {
@@ -127,11 +134,22 @@ def entity_score(
                 "not chronic pelvic pain). Score 1 when the question "
                 "names no specific condition.",
             },
+            "has_cond": {
+                "type": "noul",
+                "instructions": "Does the question name a specific "
+                "health condition, symptom, or outcome it asks about? "
+                "0 for definitional, mechanism, or how-it-works "
+                "questions.",
+            },
         },
         key=key,
         stage="extract",
     )
-    return answers["ev"]["noul"], answers["cond"]["noul"]
+    return (
+        answers["ev"]["noul"],
+        answers["cond"]["noul"],
+        answers["has_cond"]["noul"],
+    )
 
 
 def candidates(top: list) -> list[tuple]:
@@ -241,12 +259,13 @@ def claims_iter(
         )
         passed = [
             x
-            for x, (ev, cond) in zip(ranked[:ENTITY_POOL], escores)
-            if ev >= ENTITY_MIN and cond >= COND_MIN
+            for x, (ev, cond, has_cond) in zip(ranked[:ENTITY_POOL], escores)
+            if ev >= ENTITY_MIN and (has_cond < HAS_COND_MIN or cond >= COND_MIN)
         ]
         if meta is not None:
-            meta["entity_scores"] = [ev for ev, _ in escores]
-            meta["cond_scores"] = [cond for _, cond in escores]
+            meta["entity_scores"] = [ev for ev, _, _ in escores]
+            meta["cond_scores"] = [cond for _, cond, _ in escores]
+            meta["has_cond_scores"] = [hc for _, _, hc in escores]
             meta["entity_dropped"] = len(ranked[:ENTITY_POOL]) - len(passed)
         pool = passed[:TOP_CHUNKS]
     cands = candidates(pool)
