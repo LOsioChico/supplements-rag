@@ -499,3 +499,12 @@ each is re-derivable from this repo alone.
   (evidence, injection 0.0002) → retrieve 10 PMIDs → extract → verdict
   0.785 → `status: answered` with 8 cited claims, 29 model calls,
   ~9.8s end-to-end, run persisted as `runs.id=6` (24.7KB events).
+
+## ADR-020: `/v1/ping` — shallow liveness for probes, deep health for warm-up
+
+`/sr/v1/health` is deliberately deep (meta + upstream ping, see the traces
+ADR-019 bullet) — that depth is what makes it slow on a cold isolate
+(~3.2s measured), slow enough for shields-style uptime badges to read
+`down`. Rather than shallowing health (it's the visitor warm-up by
+design), `/v1/ping` answers `{"ok": true}` with no meta load and no model
+call — badges probe the cheap route, the deep one keeps its job.

@@ -387,6 +387,13 @@ def _build_app():
 
     app = FastAPI()
 
+    @app.get("/v1/ping")
+    @app.get("/sr/v1/ping")
+    async def ping():
+        """Shallow liveness — no meta, no model call. Uptime badges probe
+        this; /health stays the deep warm-up it was built to be."""
+        return JSONResponse({"ok": True})
+
     @app.get("/v1/health")
     @app.get("/sr/v1/health")
     async def health(request: Request):
