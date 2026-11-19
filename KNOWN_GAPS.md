@@ -133,9 +133,16 @@ diagram, it should work; if something here gets fixed, delete the line.
   questions moved advice→abstain — the corpus carries no herb-drug
   interaction evidence at all, so `unclear` was honest abstention, not
   over-caution (every "interaction" corpus match was a statistical
-  time×treatment artifact). Remaining real weakness: `semantic_partial`
-  rows — partial coverage exists but the extractive lane still abstains
-  (partial_answer_rate 0.36); 3 transient `unavailable`s under burst.
+  time×treatment artifact). Remaining `semantic_partial` weakness measured
+  and settled: sentence-score distributions on the 14 unclear rows that
+  reach the sentence stage overlap — partial-evidence maxima 0.44–0.67 vs
+  abstain noise max 0.58 (an olive-interaction row's top sentence is a
+  generic antioxidant quote, not interaction data — a real false
+  positive). No threshold separates them, so `unclear` on partial coverage
+  is the honest floor of the extractive lane, not a tuning hole; lifting
+  it needs a different evidence class (safety/interaction studies aren't
+  in the efficacy-grade corpus slice), not a lower gate. Plus 3 transient
+  `unavailable`s under burst.
 - Usage/cost ledger: a creatine run logged 61 calls (60 judge + 1 writer),
   `cost_usd` at upstream published rates — judge calls count tokens only
   (`vllm-sr/*` is free research API, no rate published). Pricing is a
