@@ -24,6 +24,7 @@ import logging
 import random
 import re
 import time
+import uuid
 from functools import partial
 
 from pyodide.ffi import create_proxy, run_sync, to_js
@@ -291,43 +292,44 @@ def _mask(s: str) -> str:
     return _URLQ.sub(r"\1?<query>", _PHONE.sub("<phone>", _EMAIL.sub("<email>", s)))
 
 
-async def _store_run(env, rowid, question: str, events: list[dict]) -> None:
+async def _store_run(env, rid: str, question: str, events: list[dict]) -> None:
     """Final write — fills the stub row written at stream start; inserts
     when no stub exists (run died before the first event)."""
     try:
         body = json.dumps(events, ensure_ascii=False)
         res = await (
-            env.DB.prepare("UPDATE runs SET events=? WHERE id=?")
-            .bind(body, rowid)
-            .run()
+            env.DB.prepare("UPDATE runs SET events=? WHERE rid=?").bind(body, rid).run()
         )
         res = res.to_py() if hasattr(res, "to_py") else res
         if isinstance(res, dict) and res.get("meta", {}).get("changes", 0) == 0:
             await (
-                env.DB.prepare("INSERT INTO runs (ts, q, events) VALUES (?, ?, ?)")
-                .bind(time.time(), _mask(question), body)
+                env.DB.prepare(
+                    "INSERT INTO runs (rid, ts, q, events) VALUES (?, ?, ?, ?)"
+                )
+                .bind(rid, time.time(), _mask(question), body)
                 .run()
             )
     except Exception:
         log.exception("run write failed")
 
 
-async def _insert_run_stub(env, question: str, first: dict):
+async def _insert_run_stub(env, rid: str, question: str, first: dict) -> None:
     """Marked row written while the request context is certainly alive —
     wait_until scheduled after a client disconnect never runs, so this is
-    what survives to record the abandoned ask. Returns the row id."""
+    what survives to record the abandoned ask."""
     try:
-        res = await (
-            env.DB.prepare("INSERT INTO runs (ts, q, events) VALUES (?, ?, ?)")
-            .bind(time.time(), _mask(question), json.dumps([first], ensure_ascii=False))
+        await (
+            env.DB.prepare("INSERT INTO runs (rid, ts, q, events) VALUES (?, ?, ?, ?)")
+            .bind(
+                rid,
+                time.time(),
+                _mask(question),
+                json.dumps([first], ensure_ascii=False),
+            )
             .run()
         )
-        res = res.to_py() if hasattr(res, "to_py") else res
-        if isinstance(res, dict):
-            return res.get("meta", {}).get("last_row_id")
     except Exception:
         log.exception("run stub write failed")
-    return None
 
 
 def schedule(coro) -> None:
@@ -379,6 +381,27 @@ def _build_app():
     async def health():
         return JSONResponse({"ok": True})
 
+    @app.get("/v1/run/{rid}")
+    @app.get("/sr/v1/run/{rid}")
+    async def get_run(request: Request, rid: str):
+        """The stored event stream for one run — the public rid rides the SSE
+        `run` event, so a visitor can pull their own record back."""
+        env = request.scope["env"]
+        row = (
+            await env.DB.prepare("SELECT ts, q, events FROM runs WHERE rid=?")
+            .bind(rid)
+            .first()
+        )
+        row = row.to_py() if hasattr(row, "to_py") else row
+        if not row:
+            return JSONResponse({"error": "run not found"}, status_code=404)
+        return {
+            "id": rid,
+            "ts": row["ts"],
+            "q": row["q"],
+            "events": json.loads(row["events"]),
+        }
+
     @app.get("/v1/ask")
     @app.get("/sr/v1/ask")
     async def ask(request: Request):
@@ -402,14 +425,19 @@ def _build_app():
             from supplements_rag.pipeline import answer_events
 
             collected: list[dict] = []
-            rowid = None
+            # opaque public id — a sequential rowid would let anyone walk
+            # /v1/run/1../N and read every visitor's stored question
+            rid = uuid.uuid4().hex[:12]
             try:
                 begin = {"event": "prepare_begin", **({"cold": True} if cold else {})}
                 collected.append(begin)
                 yield _sse(begin)
                 # awaited, not scheduled — the client is connected here, so
                 # the stub lands even if the run is abandoned mid-stream
-                rowid = await _insert_run_stub(env, q, begin)
+                await _insert_run_stub(env, rid, q, begin)
+                run_ev = {"event": "run", "id": rid}
+                collected.append(run_ev)
+                yield _sse(run_ev)
                 t = time.monotonic()
                 dense = _dense(env, q)
                 ev = {"event": "prepare", "ms": round((time.monotonic() - t) * 1000)}
@@ -448,7 +476,7 @@ def _build_app():
             finally:
                 # the row lands for completed, crashed, and abandoned asks
                 # alike — finally runs on generator close (client disconnect)
-                schedule(_store_run(env, rowid, q, collected))
+                schedule(_store_run(env, rid, q, collected))
 
         return StreamingResponse(
             events(),

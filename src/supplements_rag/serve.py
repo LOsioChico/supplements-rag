@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
@@ -36,7 +37,7 @@ def _mask(s: str) -> str:
     return _URLQ.sub(r"\1?<query>", _PHONE.sub("<phone>", _EMAIL.sub("<email>", s)))
 
 
-def _log_run(question: str, events: list[dict]) -> None:
+def _log_run(rid: str, question: str, events: list[dict]) -> None:
     """One JSON line per ask — the full event stream is the trace, kept so
     real runs can be classified (what failed, which stage) and folded back
     into the golden set. Question text is masked (email/phone/url-query)
@@ -45,11 +46,31 @@ def _log_run(question: str, events: list[dict]) -> None:
     with RUNS_LOG.open("a") as f:
         f.write(
             json.dumps(
-                {"ts": time.time(), "q": _mask(question), "events": events},
+                {
+                    "ts": time.time(),
+                    "rid": rid,
+                    "q": _mask(question),
+                    "events": events,
+                },
                 ensure_ascii=False,
             )
             + "\n"
         )
+
+
+def _find_run(rid: str) -> dict | None:
+    """Latest runs.jsonl line carrying this public id — same shape the
+    Worker's /v1/run/{rid} returns, so the UI can't tell dev from prod."""
+    if not RUNS_LOG.exists():
+        return None
+    for line in reversed(RUNS_LOG.read_text().splitlines()):
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("rid") == rid:
+            return rec
+    return None
 
 
 def _load() -> None:
@@ -120,11 +141,36 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if parsed.path.startswith("/v1/run/"):
+            rid = parsed.path.removeprefix("/v1/run/")
+            rec = _find_run(rid)
+            if rec is None:
+                body = json.dumps({"error": "run not found"}).encode()
+                self.send_response(404)
+            else:
+                body = json.dumps(
+                    {
+                        "id": rid,
+                        "ts": rec["ts"],
+                        "q": rec["q"],
+                        "events": rec["events"],
+                    },
+                    ensure_ascii=False,
+                ).encode()
+                self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self._cors()
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if parsed.path != "/v1/ask":
             self.send_response(404)
             self.end_headers()
             return
         q = (parse_qs(parsed.query).get("q") or [""])[0].strip()
+        # opaque public id — sequential ids would let anyone enumerate
+        # every stored question (same convention as the Worker's rid)
+        rid = uuid.uuid4().hex[:12]
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("cache-control", "no-cache")
@@ -137,6 +183,12 @@ class Handler(BaseHTTPRequestHandler):
             # frame around it so the client's record attributes the wait
             # to the stage that caused it instead of inflating the gate
             self.wfile.write(b'data: {"event": "prepare_begin"}\n\n')
+            self.wfile.flush()
+            run_ev = {"event": "run", "id": rid}
+            events.append(run_ev)
+            self.wfile.write(
+                f"data: {json.dumps(run_ev, ensure_ascii=False)}\n\n".encode()
+            )
             self.wfile.flush()
             t = time.monotonic()
             dense = _dense(q)
@@ -164,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             # disconnects and crashes exit above — logging in finally keeps
             # abandoned/failed runs in runs.jsonl, not just clean ones
-            _log_run(q, events)
+            _log_run(rid, q, events)
 
     def log_message(self, format: str, *args) -> None:
         sys.stderr.write(f"[serve] {format % args}\n")

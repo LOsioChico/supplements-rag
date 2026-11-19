@@ -446,7 +446,16 @@ each is re-derivable from this repo alone.
   coroutine. Completion `UPDATE`s the same row with the full event log
   (`INSERT` fallback if no stub exists); a killed stream keeps the stub
   — an abandoned run is an honest partial row, not silence. Same honesty
-  as `data/runs.jsonl` locally.
+  as `data/runs.jsonl` locally. Each run gets an opaque public id
+  (`uuid4().hex[:12]`, stored in `runs.rid`) — a sequential rowid would
+  let anyone walk `/run/1…N` and read every visitor's stored question.
+  The id rides the SSE stream as a `run` event right after
+  `prepare_begin`, and `GET /sr/v1/run/{rid}` returns the stored record
+  (`{"id", "ts", "q", "events"}`, JSON 404 when absent) — a visitor can
+  pull their own run back, which is what makes the exhibit's
+  inspectability claim real instead of wrangler-only. Local dev serves
+  the same contract: `serve.py` exposes `/v1/run/{rid}` over
+  `data/runs.jsonl`.
 - **Verified live:** prod ask "does magnesium help sleep?" → gate
   (evidence, injection 0.0002) → retrieve 10 PMIDs → extract → verdict
   0.785 → `status: answered` with 8 cited claims, 29 model calls,

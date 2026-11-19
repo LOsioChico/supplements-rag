@@ -84,7 +84,10 @@ diagram, it should work; if something here gets fixed, delete the line.
   (startup memory). Per-ask event log lands in the D1 `runs` table —
   completed and abandoned runs alike (stub insert at stream start +
   update on completion; disconnect-tested on prod: a killed stream left
-  the `prepare_begin` stub row, `cold` flag included). Verified live,
+  the `prepare_begin` stub row, `cold` flag included) and is publicly
+  readable — the stream's `run` event carries an opaque public id,
+  `GET /sr/v1/run/{rid}` returns the stored events (same route on local
+  `serve.py` over `runs.jsonl`). Verified live,
   not load-tested; serial extract/verify makes prod runs slower than
   local's thread pool.
 - Gate (injection noul + intent choice, `d3-flash`): the advice/evidence
