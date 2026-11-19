@@ -37,7 +37,7 @@ def _mask(s: str) -> str:
     return _URLQ.sub(r"\1?<query>", _PHONE.sub("<phone>", _EMAIL.sub("<email>", s)))
 
 
-def _log_run(rid: str, question: str, events: list[dict]) -> None:
+def _log_run(rid: str, question: str, events: list[dict], source: str) -> None:
     """One JSON line per ask — the full event stream is the trace, kept so
     real runs can be classified (what failed, which stage) and folded back
     into the golden set. Question text is masked (email/phone/url-query)
@@ -50,6 +50,7 @@ def _log_run(rid: str, question: str, events: list[dict]) -> None:
                     "ts": time.time(),
                     "rid": rid,
                     "q": _mask(question),
+                    "source": source,
                     "events": events,
                 },
                 ensure_ascii=False,
@@ -167,7 +168,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
-        q = (parse_qs(parsed.query).get("q") or [""])[0].strip()
+        qs = parse_qs(parsed.query)
+        q = (qs.get("q") or [""])[0].strip()
+        # same allowlist as the Worker — preset click vs typed question
+        src = qs.get("source", ["typed"])[0]
+        source = src if src in ("preset", "typed") else "typed"
         # opaque public id — sequential ids would let anyone enumerate
         # every stored question (same convention as the Worker's rid)
         rid = uuid.uuid4().hex[:12]
@@ -216,7 +221,7 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             # disconnects and crashes exit above — logging in finally keeps
             # abandoned/failed runs in runs.jsonl, not just clean ones
-            _log_run(rid, q, events)
+            _log_run(rid, q, events, source)
 
     def log_message(self, format: str, *args) -> None:
         sys.stderr.write(f"[serve] {format % args}\n")

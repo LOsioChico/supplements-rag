@@ -292,7 +292,9 @@ def _mask(s: str) -> str:
     return _URLQ.sub(r"\1?<query>", _PHONE.sub("<phone>", _EMAIL.sub("<email>", s)))
 
 
-async def _store_run(env, rid: str, question: str, events: list[dict]) -> None:
+async def _store_run(
+    env, rid: str, question: str, events: list[dict], source: str
+) -> None:
     """Final write — fills the stub row written at stream start; inserts
     when no stub exists (run died before the first event)."""
     try:
@@ -304,27 +306,32 @@ async def _store_run(env, rid: str, question: str, events: list[dict]) -> None:
         if isinstance(res, dict) and res.get("meta", {}).get("changes", 0) == 0:
             await (
                 env.DB.prepare(
-                    "INSERT INTO runs (rid, ts, q, events) VALUES (?, ?, ?, ?)"
+                    "INSERT INTO runs (rid, ts, q, events, source) VALUES (?, ?, ?, ?, ?)"
                 )
-                .bind(rid, time.time(), _mask(question), body)
+                .bind(rid, time.time(), _mask(question), body, source)
                 .run()
             )
     except Exception:
         log.exception("run write failed")
 
 
-async def _insert_run_stub(env, rid: str, question: str, first: dict) -> None:
+async def _insert_run_stub(
+    env, rid: str, question: str, first: dict, source: str
+) -> None:
     """Marked row written while the request context is certainly alive —
     wait_until scheduled after a client disconnect never runs, so this is
     what survives to record the abandoned ask."""
     try:
         await (
-            env.DB.prepare("INSERT INTO runs (rid, ts, q, events) VALUES (?, ?, ?, ?)")
+            env.DB.prepare(
+                "INSERT INTO runs (rid, ts, q, events, source) VALUES (?, ?, ?, ?, ?)"
+            )
             .bind(
                 rid,
                 time.time(),
                 _mask(question),
                 json.dumps([first], ensure_ascii=False),
+                source,
             )
             .run()
         )
@@ -411,6 +418,10 @@ def _build_app():
         q = (request.query_params.get("q") or "").strip()
         if not q:
             return JSONResponse({"error": "missing q"}, status_code=400)
+        # preset click vs typed question — different demand signal for
+        # traffic analysis; anything unrecognised counts as typed
+        source = request.query_params.get("source")
+        source = source if source in ("preset", "typed") else "typed"
         key = _env(env, "VLLM_SR_API_KEY")
         base = _env(env, "VLLM_SR_BASE", "https://app.vllm-sr.ai")
         # this ask builds the isolate's BM25 meta ⇔ it pays the cold init —
@@ -434,7 +445,7 @@ def _build_app():
                 yield _sse(begin)
                 # awaited, not scheduled — the client is connected here, so
                 # the stub lands even if the run is abandoned mid-stream
-                await _insert_run_stub(env, rid, q, begin)
+                await _insert_run_stub(env, rid, q, begin, source)
                 run_ev = {"event": "run", "id": rid}
                 collected.append(run_ev)
                 yield _sse(run_ev)
@@ -476,7 +487,7 @@ def _build_app():
             finally:
                 # the row lands for completed, crashed, and abandoned asks
                 # alike — finally runs on generator close (client disconnect)
-                schedule(_store_run(env, rid, q, collected))
+                schedule(_store_run(env, rid, q, collected, source))
 
         return StreamingResponse(
             events(),
