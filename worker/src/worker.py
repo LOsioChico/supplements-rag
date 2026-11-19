@@ -296,9 +296,13 @@ async def _store_run(
     env, rid: str, question: str, events: list[dict], source: str
 ) -> None:
     """Final write — fills the stub row written at stream start; inserts
-    when no stub exists (run died before the first event)."""
+    when no stub exists (run died before the first event). Token/think
+    events are dropped: replay cosmetics, the status event carries the answer."""
     try:
-        body = json.dumps(events, ensure_ascii=False)
+        body = json.dumps(
+            [e for e in events if e.get("event") not in ("token", "think")],
+            ensure_ascii=False,
+        )
         res = await (
             env.DB.prepare("UPDATE runs SET events=? WHERE rid=?").bind(body, rid).run()
         )

@@ -476,7 +476,9 @@ each is re-derivable from this repo alone.
   just booted `_META`) — written while the request context is certainly
   alive, because `wait_until` scheduled after a client disconnect never
   runs: the runtime cancels the request as hung and drops the scheduled
-  coroutine. Completion `UPDATE`s the same row with the full event log
+  coroutine. Completion `UPDATE`s the same row with the event log minus
+  `token`/`think` events (replay cosmetics — ~90% of a writer-lane
+  stream; the terminal `status` event already carries the assembled answer)
   (`INSERT` fallback if no stub exists); a killed stream keeps the stub
   — an abandoned run is an honest partial row, not silence. Same honesty
   as `data/runs.jsonl` locally. Each run gets an opaque public id

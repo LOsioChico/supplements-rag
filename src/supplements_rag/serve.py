@@ -38,7 +38,8 @@ def _mask(s: str) -> str:
 
 
 def _log_run(rid: str, question: str, events: list[dict], source: str) -> None:
-    """One JSON line per ask — the full event stream is the trace, kept so
+    """One JSON line per ask — the event stream (minus token/think events:
+    replay cosmetics, the status event carries the answer) is the trace, kept so
     real runs can be classified (what failed, which stage) and folded back
     into the golden set. Question text is masked (email/phone/url-query)
     — it's free visitor input, same privacy contract as traces."""
@@ -51,7 +52,9 @@ def _log_run(rid: str, question: str, events: list[dict], source: str) -> None:
                     "rid": rid,
                     "q": _mask(question),
                     "source": source,
-                    "events": events,
+                    "events": [
+                        e for e in events if e.get("event") not in ("token", "think")
+                    ],
                 },
                 ensure_ascii=False,
             )
