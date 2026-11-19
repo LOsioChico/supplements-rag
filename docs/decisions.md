@@ -383,6 +383,26 @@ each is re-derivable from this repo alone.
   path, it doesn't rescue golden rows); verified-answer 94%, refuted-
   refusal 100%, 0 dangerous. `has_cond_scores` dumps beside
   `cond_scores` for the report.
+- **Fourth+fifth fields `rel`/`has_rel` — the relationship axis
+  (post-heldout):** the heldout set exposed a class golden never had —
+  5 MedQuAD "interactions between X and Y" rows answered on
+  non-interaction evidence (statistical P<0.05 noise, efficacy papers).
+  Substance and condition axes don't see it: right substance, no
+  condition named — the relationship itself IS the question. `has_rel`
+  gates it ("does the question ask a specific relationship —
+  interactions, combinations, comparisons?"): measured 0.93–0.97
+  relationship questions vs 0.03–0.09 single-substance. `rel` checks the
+  source studies that relationship in its intended sense — first
+  wording excluded combination trials (a real caffeine+coconut-oil
+  combined-intake RCT scored 0.36 → false veto); widened to count
+  combined/co-administration evidence: wrong-evidence ≤0.53 vs real
+  interaction/combination studies ≥0.78 → `REL_MIN=0.6`. `question_score`
+  and `sentence_score` carry the same intended-sense clause so the
+  chunk/sentence scorers share the disambiguation. Result: heldout
+  dangerous 6→4 (fabricated class dead — the statistical-interaction
+  and efficacy-paper answers now abstain; residual is 3 scope-mismatch
+  answers on *real* combination studies — 'herbs' answered with a
+  medications review — plus 1 refuted-PMID leak).
   an actual question — "only if the checked input is itself a question;
   evidence cannot answer something that is not one". The invariant lives
   in the answerability score itself — one place, no input-shape list.

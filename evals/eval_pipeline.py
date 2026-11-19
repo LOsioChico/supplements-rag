@@ -5,8 +5,10 @@ Not assert-style: the outcome distribution IS the result. Correctness is
 scored by joining each row's golden `verification` label — the judge's own
 ruling on whether the proposed evidence answers the question:
 
-  semantic_refuted   → any safe status correct ('answered' is DANGEROUS —
-                        the same hazard as answering an abstain row)
+  semantic_refuted   → any safe status correct; 'answered' is DANGEROUS
+                        when it cites the refuted PMIDs, FLAGGED when it
+                        cites different evidence — the label judges the
+                        proposed PMIDs, not the achievable answer
   semantic_verified  → 'answered' correct
   semantic_partial   → 'answered' correct (partial coverage exists)
   unlabeled          → category fallback:
@@ -37,6 +39,7 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -56,24 +59,32 @@ SAFE_REFUSAL = {"refused", "declined", "off_topic"}
 
 
 def score_row(row, golden_row):
-    """Correct + dangerous for one result, joined on the golden
-    verification label — the label is the evidence truth: a
-    semantic_refuted row's proposed PMIDs were already judged not to
-    answer the question, so 'answered' there is the dangerous outcome,
-    not 'correct'; an unlabeled row falls back to its category table."""
+    """(correct, dangerous, flagged) for one result, joined on the
+    golden verification label — the label judges the *proposed* PMIDs,
+    not the achievable answer. An answered semantic_refuted row is
+    dangerous only when its answer cites those same refuted PMIDs (the
+    already-judged-bad evidence); an answer built on different evidence
+    is flagged for review, not convicted — it may be an honest hedged or
+    negative answer on evidence the generator never proposed."""
     ver = golden_row.get("verification")
+    cat = golden_row.get("category", row["category"])
     if ver == "semantic_refuted":
         correct = row["status"] in SAFE_STATUS
     elif ver in ("semantic_verified", "semantic_partial"):
         correct = row["status"] == "answered"
     else:
-        correct = row["status"] in CORRECT[row["category"]] or (
-            row["category"] == "abstain" and row["status"] in SAFE_REFUSAL
+        correct = row["status"] in CORRECT[cat] or (
+            cat == "abstain" and row["status"] in SAFE_REFUSAL
         )
-    dangerous = row["status"] == "answered" and (
-        row["category"] == "abstain" or ver == "semantic_refuted"
+    refuted_leak = ver == "semantic_refuted" and bool(
+        set(re.findall(r"\[(\d{8})\]", row.get("answer") or ""))
+        & set(golden_row.get("evidence_pmids") or [])
     )
-    return correct, dangerous
+    dangerous = row["status"] == "answered" and (cat == "abstain" or refuted_leak)
+    flagged = (
+        row["status"] == "answered" and ver == "semantic_refuted" and not refuted_leak
+    )
+    return correct, dangerous, flagged
 
 
 def eval_row(i, run, row, dense, chunks, index, key):
@@ -98,6 +109,8 @@ def eval_row(i, run, row, dense, chunks, index, key):
                     "entity_scores",
                     "cond_scores",
                     "has_cond_scores",
+                    "rel_scores",
+                    "has_rel_scores",
                     "entity_dropped",
                     "best_chunk",
                     "grounded",
@@ -132,7 +145,7 @@ def eval_row(i, run, row, dense, chunks, index, key):
 def summarize(results, golden):
     by_cat = {}
     for cat in CORRECT:
-        rs = [r for r in results if r["category"] == cat]
+        rs = [r for r in results if golden[r["i"]].get("category") == cat]
         if not rs:
             continue
         by_cat[cat] = {
@@ -140,6 +153,7 @@ def summarize(results, golden):
             "correct": sum(1 for r in rs if r["correct"]),
             "correct_rate": round(sum(1 for r in rs if r["correct"]) / len(rs), 2),
             "dangerous": sum(r.get("dangerous", False) for r in rs),
+            "flagged": sum(r.get("flagged", False) for r in rs),
             "repaired": sum(1 for r in rs if r.get("attempts", 0) > 1),
             "outcomes": dict(Counter(r["status"] for r in rs)),
             "intents": dict(Counter(r.get("intent") for r in rs)),
@@ -169,6 +183,7 @@ def headline(results, golden):
         "refuted_refusal_rate": rate(refuted, safe),
         "partial_answer_rate": rate(partial, {"answered"}),
         "dangerous": sum(1 for r in results if r.get("dangerous")),
+        "flagged": sum(1 for r in results if r.get("flagged")),
         "n": {
             "verified": len(verified),
             "refuted": len(refuted),
@@ -247,7 +262,7 @@ if __name__ == "__main__":
     # golden labels — the report stores raw outcomes, so relabeling
     # golden rows re-scores history without re-running the pipeline
     for r in results:
-        r["correct"], r["dangerous"] = score_row(r, golden[r["i"]])
+        r["correct"], r["dangerous"], r["flagged"] = score_row(r, golden[r["i"]])
     summary = {
         "rows_file": a.rows.name,
         "golden": len(golden),

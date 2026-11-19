@@ -44,9 +44,11 @@ COND_MIN = 0.1
 # entity-check runs on the top-ranked chunks plus a couple of
 # replacement ranks — a dropped leader still leaves quote material
 ENTITY_POOL = 5
-# below this the question names no condition and cond must not veto —
-# measured split: definitional 0.04-0.39, conditional 0.85-0.89
+# below each MIN the axis is off — the question names no referent for
+# it (calibration in ADR-016)
 HAS_COND_MIN = 0.5
+HAS_REL_MIN = 0.5
+REL_MIN = 0.6
 # sentence ends only before a capital/digit — 'L. acidophilus', 'et al.',
 # 'vs.' stay inside their sentence so quotes don't shatter mid-name
 _SENT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
@@ -66,7 +68,11 @@ def question_score(question: str, chunk: dict, *, ask_fn=judge.ask, key=None) ->
                 "instructions": "Does the source provide evidence that "
                 f"answers this question: {question} — only if the checked "
                 "input is itself a question; evidence cannot answer "
-                "something that is not one",
+                "something that is not one. Answer the question in its "
+                "intended sense — shared vocabulary in a different sense "
+                "does not count: for an interactions question, "
+                "combined or co-administration evidence counts, but a "
+                "statistical 'interaction' between variables does not.",
             }
         },
         key=key,
@@ -87,7 +93,11 @@ def sentence_score(
             "ev": {
                 "type": "noul",
                 "instructions": "Does this sentence provide evidence that "
-                f"answers this question: {question}",
+                f"answers this question: {question} — in the question's "
+                "intended sense; shared vocabulary in a different sense "
+                "does not count: for an interactions question, combined "
+                "or co-administration evidence counts, but a statistical "
+                "'interaction' between variables does not.",
             }
         },
         key=key,
@@ -99,20 +109,17 @@ def sentence_score(
 def entity_score(
     question: str, chunk: dict, *, ask_fn=judge.ask, key=None
 ) -> tuple[float, float, float]:
-    """(ev, cond, has_cond) noul scores: does this SOURCE study the same
-    substance AND the same condition the question names — and does the
-    question name a condition at all? Scored at chunk level, not
-    sentence level — the abstract body defines what a bare quote can't (a
-    trial codenamed 'ART' names its substance in the full text). A
-    dedicated single-criterion check: folded into question/sentence_score
-    the judge trades identity off against topical relevance
-    (myricetin-for-myrcia scored 0.81 folded into sentence_score, 0.31 as
-    this dedicated check). Same substance, wrong condition is the same
-    failure — a fibromyalgia trial's efficacy quote can't answer for
-    chronic pelvic pain; the second axis drops it. The third gates it:
-    cond is undefined on condition-free questions (the judge anchors on
-    the study's population and scores mid-band anyway), so has_cond
-    decides whether the veto applies at all."""
+    """(ev, cond, has_cond, rel, has_rel) noul scores on one call: does
+    this SOURCE study the same substance, the same condition, and the
+    same relationship the question names — with has_* gating each axis
+    to questions that name a referent for it (the judge anchors on the
+    study and scores an undefined axis mid-band anyway). Scored at chunk
+    level, not sentence level — the abstract body defines what a bare
+    quote can't (a trial codenamed 'ART' names its substance in the full
+    text). A dedicated single-criterion check: folded into
+    question/sentence_score the judge trades identity off against
+    topical relevance (myricetin-for-myrcia scored 0.81 folded in, 0.31
+    as this dedicated check)."""
     answers = ask_fn(
         f"Source:\n{chunk['title']}\n{chunk['text'][:12000]}\n\nQuestion: {question}",
         {
@@ -141,6 +148,23 @@ def entity_score(
                 "0 for definitional, mechanism, or how-it-works "
                 "questions.",
             },
+            "has_rel": {
+                "type": "noul",
+                "instructions": "Does the question ask about a specific "
+                "relationship between things — interactions, "
+                "combinations, comparisons — rather than a single "
+                "substance's effect or definition?",
+            },
+            "rel": {
+                "type": "noul",
+                "instructions": "Does this source study the relationship "
+                "the question asks about — in the question's intended "
+                "sense? For an interactions question, a study that tests "
+                "the substance combined with another agent or reviews "
+                "co-administration effects counts; a statistical "
+                "interaction between variables does NOT. Topical "
+                "relevance is not the asked relationship.",
+            },
         },
         key=key,
         stage="extract",
@@ -149,6 +173,8 @@ def entity_score(
         answers["ev"]["noul"],
         answers["cond"]["noul"],
         answers["has_cond"]["noul"],
+        answers["rel"]["noul"],
+        answers["has_rel"]["noul"],
     )
 
 
@@ -259,13 +285,19 @@ def claims_iter(
         )
         passed = [
             x
-            for x, (ev, cond, has_cond) in zip(ranked[:ENTITY_POOL], escores)
-            if ev >= ENTITY_MIN and (has_cond < HAS_COND_MIN or cond >= COND_MIN)
+            for x, (ev, cond, has_cond, rel, has_rel) in zip(
+                ranked[:ENTITY_POOL], escores
+            )
+            if ev >= ENTITY_MIN
+            and (has_cond < HAS_COND_MIN or cond >= COND_MIN)
+            and (has_rel < HAS_REL_MIN or rel >= REL_MIN)
         ]
         if meta is not None:
-            meta["entity_scores"] = [ev for ev, _, _ in escores]
-            meta["cond_scores"] = [cond for _, cond, _ in escores]
-            meta["has_cond_scores"] = [hc for _, _, hc in escores]
+            meta["entity_scores"] = [ev for ev, _, _, _, _ in escores]
+            meta["cond_scores"] = [cond for _, cond, _, _, _ in escores]
+            meta["has_cond_scores"] = [hc for _, _, hc, _, _ in escores]
+            meta["rel_scores"] = [rel for _, _, _, rel, _ in escores]
+            meta["has_rel_scores"] = [hr for _, _, _, _, hr in escores]
             meta["entity_dropped"] = len(ranked[:ENTITY_POOL]) - len(passed)
         pool = passed[:TOP_CHUNKS]
     cands = candidates(pool)

@@ -153,15 +153,28 @@ lists come from the same sidecar path (`data/dense-heldout.json`).
 
 Run it: `python evals/eval_pipeline.py --rows evals/heldout.jsonl --dense data/dense-heldout.json`
 
-| Metric | golden v8 | held-out | Reading |
+| Metric | golden | held-out | Reading |
 | --- | --- | --- | --- |
-| verified → answered | 0.91 | **0.92** | generalizes — never-tuned questions answer at the same rate |
-| refuted → safe refusal | 1.00 | 0.92 | 6 answered — all on **correct-entity** evidence the proposed PMIDs didn't contain (entity scores 0.66–0.97): honest hedged/negative answers, not wrong-entity leaks — the `semantic_refuted` label flags proposed evidence, not the achievable answer |
-| dangerous | 0 | **0** | no abstain-category row answered on either set |
-| abstain correct | 100% | **100%** | 25/25 |
+| verified → answered | 0.94 | **0.92** | generalizes — never-tuned questions answer at the same rate |
+| refuted → safe refusal | 1.00 | 0.87 | 10 answered: 1 dangerous (cites the refuted PMID), 9 `flagged` — answered on *different* evidence the label can't judge (the `semantic_refuted` label flags proposed PMIDs, not the achievable answer) |
+| dangerous | 0 | **4** | 1 refuted-PMID leak + **3 scope-mismatch interaction answers** — the fabricated class (statistical-interaction noise, efficacy papers) is dead post-rel-axis; the residue answers 'interactions with herbs/foods' from *real* combination studies on the wrong counterparty (a medications review for a herbs ask) |
+| abstain correct | 100% | **95%** | 52/55 — the misses are the 3 scope-mismatch interaction answers |
+| advice correct | 100% | **87%** | 13/15 — misses: biotin/oats safety questions with adjacent corpus content |
 
-The held-out set is the honest headline: a system tuned on 120 rows
-behaves the same on 199 it never saw.
+The held-out set is the honest headline: calibrated thresholds generalize
+(verified 0.92 vs 0.94, answerable/negative within a point), and it
+exposes the class golden never had — interaction questions the corpus
+can't support. `sentence_score` can't yet tell a clinical interaction
+(co-administration effect) from a statistical one (treatment×time),
+so "Are there interactions between X and Y?" can quote an "interactions
+P<0.05" sentence verbatim. 30 heldout advice rows relabeled to abstain
+where the corpus provably lacks the asked evidence (same rule as
+golden); correctness now derives from the *current* golden category +
+verification label at summary time, so relabeling re-scores history.
+
+`flagged` = answered on a semantic_refuted row citing none of the
+refuted PMIDs — plausibly honest hedged/negative answers, reported
+separately from dangerous until each is reviewed.
 
 **The v7 finding, stated plainly:** a dedicated entity check ("does this
 source study the same substance the question names — exact identity or
