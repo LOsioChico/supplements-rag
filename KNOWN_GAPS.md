@@ -43,11 +43,14 @@ diagram, it should work; if something here gets fixed, delete the line.
   names a condition — `has_cond < 0.5` skips it (definitional asks
   otherwise ate undefined-axis noise: measured cond 0.12–0.58 on
   'What is Capsicum?'). Borderline mismatches in the 0.1–0.6 band
-  still pass on condition-naming questions; verified chunks score
-  mid-band too often for a harder line (measured: 77% kept at 0.3 →
-  unacceptable loss). Mid-band wrong-condition evidence remains a
-  known hole — deeper fix is a question↔source gate on the
-  calibrated valley, not a tighter veto.
+  still pass the axis — but measured post-has_cond (golden rerun):
+  all 20 rows with mid-band refuted chunks produced zero kept
+  sentences (best_chunk ≤0.44 vs verified answerers ≥0.77) —
+  `question_score`/`sentence_score` are the de-facto
+  question↔source gate; a wrong-condition chunk can't quote a
+  sentence that answers the question. Residual: generic boilerplate
+  (safety/tolerability text) answering the letter of a question from
+  a wrong-condition study — verdict layer, not extraction.
 - **The eval's own semantic labels carry the entity hole** —
   `evals/verify.py` asks "does this abstract answer the question" without
   anchoring the substance, so `semantic_verified` partly means "verified
