@@ -389,8 +389,23 @@ def _build_app():
 
     @app.get("/v1/health")
     @app.get("/sr/v1/health")
-    async def health():
-        return JSONResponse({"ok": True})
+    async def health(request: Request):
+        """Real warm-up, not a shell: the scroll-into-view health hit pays
+        the isolate's cold init (BM25 meta + model TLS) so the visitor's
+        ask lands on a warm stack."""
+        env = request.scope["env"]
+        _meta(env)
+        try:
+            _w_ask(
+                "ping",
+                {"ok": {"type": "noul", "instructions": "Is this a ping?"}},
+                key=_env(env, "VLLM_SR_API_KEY"),
+                base=_env(env, "VLLM_SR_BASE", "https://app.vllm-sr.ai"),
+            )
+            model_ok = True
+        except Exception:  # noqa: BLE001 — a health ping must never 500 the healthcheck
+            model_ok = False
+        return JSONResponse({"ok": True, "model": model_ok})
 
     @app.get("/v1/run/{rid}")
     @app.get("/sr/v1/run/{rid}")

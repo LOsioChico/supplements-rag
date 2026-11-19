@@ -490,7 +490,11 @@ each is re-derivable from this repo alone.
   pull their own run back, which is what makes the exhibit's
   inspectability claim real instead of wrangler-only. Local dev serves
   the same contract: `serve.py` exposes `/v1/run/{rid}` over
-  `data/runs.jsonl`.
+  `data/runs.jsonl`. `GET /sr/v1/health` is a real warm-up, not a shell —
+  it pays the isolate's cold init (`_meta` D1 stats + one judge ping) so
+  the exhibit's scroll-into-view health hit lands before the visitor's
+  ask does; measured failure mode without it: the platform cancels
+  cold-boot asks as hung before the run stub can even write.
 - **Verified live:** prod ask "does magnesium help sleep?" → gate
   (evidence, injection 0.0002) → retrieve 10 PMIDs → extract → verdict
   0.785 → `status: answered` with 8 cited claims, 29 model calls,

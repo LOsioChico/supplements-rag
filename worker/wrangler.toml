@@ -10,7 +10,7 @@ preview_urls = false
 
 # warm path is ~50-260ms CPU, cold-start import burst is the real cost;
 # bounded but not clipping legit asks
-limits = { cpu_ms = 8000 }
+limits = { cpu_ms = 30000 }
 
 ai = { binding = "AI" }
 
