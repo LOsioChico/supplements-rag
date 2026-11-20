@@ -170,6 +170,18 @@ diagram, it should work; if something here gets fixed, delete the line.
   is looser) + 1 refuted-PMID leak. Note: the entity/rel gate only
   fires on corpus-rare question tokens — common substances never see
   the axis (sentence layer is their only net).
+- Near-miss eval (`evals/nearmiss.jsonl`, 50 rejected-admission questions,
+  all `no_corpus_coverage`): 48 refused cleanly; 1 dangerous —
+  phytase-for-infant-development answered on an *animal* weight-gain
+  study (species mismatch — hedged, but wrong-species evidence); 1 row
+  mislabeled by the admission rule itself ('how effective is creatine'
+  answered — corpus covers it; dense leg found what BM25's check missed).
+  Species class is real but inconsistent across sets: 822 animal-only
+  studies in-corpus (PubMed tags animal RCTs with the same
+  `Randomized Controlled Trial` pubtype the ingest filter trusts); 4
+  answered rows cite them — 3 present animal evidence as human-relevant
+  (phytase, L-arginine, strontium), 1 hedges correctly (alfalfa dosage
+  answer explicitly says the studies are farm-animal feeding trials).
 - Usage/cost ledger: a creatine run logged 61 calls (60 judge + 1 writer),
   `cost_usd` at upstream published rates — judge calls count tokens only
   (`vllm-sr/*` is free research API, no rate published). Pricing is a
