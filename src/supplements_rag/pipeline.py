@@ -720,6 +720,7 @@ def answer_events(
     write_fn=generate.write_stream,
     stream_fn=generate.chat_stream,
     key: str | None = None,
+    embed: str | None = None,
 ):
     """The same pipeline as an event stream — the exhibit path.
 
@@ -773,7 +774,13 @@ def answer_events(
 
     t = time.monotonic()
     pack = retrieve(index, chunks_by_id, question, dense, top_k=10)
-    yield {"event": "retrieve", "pack": [c["pmid"] for c in pack], "ms": _ms(t)}
+    yield {
+        "event": "retrieve",
+        "pack": [c["pmid"] for c in pack],
+        "ms": _ms(t),
+        # the embed ran before this event, in the caller's dense leg
+        **({"embed": embed} if embed else {}),
+    }
     # built once so every outcome that shows the check trail — answered,
     # unclear, abstained — can resolve study titles for its claims
     citations = {

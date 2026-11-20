@@ -7,6 +7,7 @@ import { getPlatformProxy } from "wrangler";
 import { createServer } from "node:http";
 
 const PORT = Number(process.env.DENSE_PORT ?? 8779);
+const MODEL = "@cf/baai/bge-m3";
 const { env } = await getPlatformProxy({ configPath: "worker/wrangler.toml" });
 // same question → same embedding → same hits; cache instead of re-paying
 const cache = new Map();
@@ -25,12 +26,12 @@ const server = createServer(async (req, res) => {
   const q = (url.searchParams.get("q") ?? "").trim();
   try {
     if (!cache.has(q)) {
-      const vec = await env.AI.run("@cf/baai/bge-m3", { text: [q] });
+      const vec = await env.AI.run(MODEL, { text: [q] });
       const r = await env.VECTORIZE.query(vec.data[0], { topK: 20 });
       cache.set(q, r.matches.map((m) => [m.id, m.score]));
     }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(cache.get(q)));
+    res.end(JSON.stringify({ model: MODEL, matches: cache.get(q) }));
   } catch (e) {
     res.writeHead(502);
     res.end(String(e));

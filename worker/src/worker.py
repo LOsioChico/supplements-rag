@@ -499,6 +499,7 @@ def _build_app():
                     ask_fn=partial(_w_ask, base=base),
                     stream_fn=partial(_w_chat_stream, key=key, base=base),
                     key=key,
+                    embed=EMBED_MODEL,
                 ):
                     collected.append(ev)
                     yield _sse(ev)

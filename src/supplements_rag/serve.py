@@ -91,14 +91,16 @@ DENSE_URL = os.environ.get("DENSE_URL", "http://127.0.0.1:8779")
 _sidecar_ready = threading.Event()
 
 
-def _dense(question: str) -> list:
-    """Question → [[chunk_id, score], ...] via the warm node sidecar —
-    only the embed + Vectorize calls, no per-request runtime boot."""
+def _dense(question: str) -> tuple[list, str]:
+    """Question → (matches, embed_model) via the warm node sidecar —
+    only the embed + Vectorize calls, no per-request runtime boot. The
+    sidecar reports the model it ran so the event stream names it."""
     _sidecar_ready.wait(timeout=45)  # first request may outlast the boot
     with urllib.request.urlopen(
         f"{DENSE_URL}/dense?q={quote(question)}", timeout=60
     ) as r:
-        return json.loads(r.read())
+        d = json.loads(r.read())
+        return d["matches"], d["model"]
 
 
 def _start_sidecar() -> subprocess.Popen:
@@ -199,13 +201,20 @@ class Handler(BaseHTTPRequestHandler):
             )
             self.wfile.flush()
             t = time.monotonic()
-            dense = _dense(q)
+            dense, embed_model = _dense(q)
             ms = round((time.monotonic() - t) * 1000)
             self.wfile.write(f'data: {{"event": "prepare", "ms": {ms}}}\n\n'.encode())
             self.wfile.flush()
             events.append({"event": "prepare", "ms": ms})
             key = os.environ["VLLM_SR_API_KEY"]
-            for ev in answer_events(q, dense, STATE["chunks"], STATE["index"], key=key):
+            for ev in answer_events(
+                q,
+                dense,
+                STATE["chunks"],
+                STATE["index"],
+                key=key,
+                embed=embed_model,
+            ):
                 events.append(ev)
                 self.wfile.write(
                     f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode()
