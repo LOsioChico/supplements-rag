@@ -319,18 +319,49 @@ async def _store_run(
         log.exception("run write failed")
 
 
+# request.cf metadata keyed by cf-ray — the ASGI adapter doesn't forward cf
+# into scope, so Default.fetch stashes it here and _visitor pops it back out.
+# Ray ids are unique per request ⇒ no cross-request bleed; bounded vs leaks.
+_CF: dict[str, dict] = {}
+
+
 def _visitor(request) -> dict:
-    """bot-vs-human signal from CF edge headers — no IP stored."""
+    """bot-vs-human signal — CF edge headers + request.cf (no IP stored).
+    asn/asorg catch datacenter bots that fake browser headers."""
     h = request.headers
-    tail = h.get("cf-ray", "").rsplit("-", 1)[-1]
+    cf = _CF.pop(h.get("cf-ray", ""), {})
     return {
         "ua": h.get("user-agent", "")[:160],
-        "co": h.get("cf-ipcountry", ""),
-        "colo": tail if tail.isalpha() and len(tail) <= 4 else "",
+        "co": cf.get("country") or h.get("cf-ipcountry", ""),
+        "city": cf.get("city", ""),
+        "colo": cf.get("colo", ""),
+        "asn": cf.get("asn"),
+        "asorg": (cf.get("asOrganization") or "")[:60],
+        "tls": cf.get("tlsVersion", ""),
+        "rtt": cf.get("clientTcpRtt"),
         "ref": h.get("referer", "")[:160],
         "lang": h.get("accept-language", "")[:40],
         "secfetch": h.get("sec-fetch-mode", ""),
     }
+
+
+async def _siteverify(env, token: str, ip: str):
+    """Turnstile check — 'ok'/'fail'/'none'/'err'. None secret → skipped."""
+    secret = _env(env, "TURNSTILE_SECRET")
+    if not secret or not token:
+        return "none"
+    try:
+        from workers import fetch as wfetch
+
+        res = await wfetch(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            method="POST",
+            headers={"content-type": "application/json"},
+            body=json.dumps({"secret": secret, "response": token, "remoteip": ip}),
+        )
+        return "ok" if (await res.json()).get("success") else "fail"
+    except Exception:
+        return "err"
 
 
 async def _insert_run_stub(
@@ -479,6 +510,13 @@ def _build_app():
             # opaque public id — a sequential rowid would let anyone walk
             # /v1/run/1../N and read every visitor's stored question
             rid = uuid.uuid4().hex[:12]
+            vtask = asyncio.ensure_future(
+                _siteverify(
+                    env,
+                    request.headers.get("x-turnstile", ""),
+                    request.headers.get("cf-connecting-ip", ""),
+                )
+            )
             try:
                 begin = {"event": "prepare_begin", **({"cold": True} if cold else {})}
                 collected.append(begin)
@@ -528,6 +566,11 @@ def _build_app():
                 collected.append(ev)
                 yield _sse(ev)
             finally:
+                try:
+                    ok = await asyncio.wait_for(vtask, 1.0)
+                    collected.append({"event": "verified", "ok": ok})
+                except Exception:
+                    pass
                 # the row lands for completed, crashed, and abandoned asks
                 # alike — finally runs on generator close (client disconnect)
                 schedule(_store_run(env, rid, q, collected, source))
@@ -552,3 +595,17 @@ async def _lazy_app(scope, receive, send):
 
 class Default(asgi.entrypoint(_lazy_app)):
     """Worker entrypoint."""
+
+    async def fetch(self, request):
+        # stash request.cf for _visitor — the ASGI adapter builds scope
+        # without it; keyed by cf-ray so interleaved asks can't cross-read
+        try:
+            ray = request.headers.get("cf-ray") or ""
+            cf = request.cf.to_py() if request.cf else {}
+            if ray and cf:
+                if len(_CF) > 256:
+                    _CF.clear()
+                _CF[ray] = cf
+        except Exception:
+            pass
+        return await super().fetch(request)
