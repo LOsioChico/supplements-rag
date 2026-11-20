@@ -319,8 +319,22 @@ async def _store_run(
         log.exception("run write failed")
 
 
+def _visitor(request) -> dict:
+    """bot-vs-human signal from CF edge headers — no IP stored."""
+    h = request.headers
+    tail = h.get("cf-ray", "").rsplit("-", 1)[-1]
+    return {
+        "ua": h.get("user-agent", "")[:160],
+        "co": h.get("cf-ipcountry", ""),
+        "colo": tail if tail.isalpha() and len(tail) <= 4 else "",
+        "ref": h.get("referer", "")[:160],
+        "lang": h.get("accept-language", "")[:40],
+        "secfetch": h.get("sec-fetch-mode", ""),
+    }
+
+
 async def _insert_run_stub(
-    env, rid: str, question: str, first: dict, source: str
+    env, rid: str, question: str, first: list[dict], source: str
 ) -> None:
     """Marked row written while the request context is certainly alive —
     wait_until scheduled after a client disconnect never runs, so this is
@@ -334,7 +348,7 @@ async def _insert_run_stub(
                 rid,
                 time.time(),
                 _mask(question),
-                json.dumps([first], ensure_ascii=False),
+                json.dumps(first, ensure_ascii=False),
                 source,
             )
             .run()
@@ -469,9 +483,11 @@ def _build_app():
                 begin = {"event": "prepare_begin", **({"cold": True} if cold else {})}
                 collected.append(begin)
                 yield _sse(begin)
+                vis = {"event": "visitor", **_visitor(request)}
+                collected.append(vis)
                 # awaited, not scheduled — the client is connected here, so
                 # the stub lands even if the run is abandoned mid-stream
-                await _insert_run_stub(env, rid, q, begin, source)
+                await _insert_run_stub(env, rid, q, [begin, vis], source)
                 run_ev = {"event": "run", "id": rid}
                 collected.append(run_ev)
                 yield _sse(run_ev)
