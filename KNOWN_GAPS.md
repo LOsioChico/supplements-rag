@@ -186,6 +186,29 @@ diagram, it should work; if something here gets fixed, delete the line.
   `cost_usd` at upstream published rates — judge calls count tokens only
   (`vllm-sr/*` is free research API, no rate published). Pricing is a
   static table of list rates, not the deployment's real bill ($0/quota).
+- Over-abstain attribution, corrected by evidence-in-pack check (2026-11-21):
+  earlier read blamed weak retrieval because abstains averaged 0.33
+  best-chunk vs 0.82 answered. Rebuilding each row's real fused pack
+  (BM25 top-20 + dense, RRF, rare-entity prepend) against the row's
+  `evidence_pmids` flips that: **21 of 22** answerable-unclear rows had at
+  least one answer-bearing PMID inside the top-10 pack — retrieval found
+  it, the extract/verify layer scored it insufficient. Only 1 of 22 was a
+  true miss (arnica/stiffness). The 0.33 was the verifier's score *on
+  present evidence*, not evidence absence — the strictness class is the
+  bulk, not a subset. Within it, `has_rel` failures cluster on
+  phrasing aliases, not hedge words alone: safflower→"linoleic acid
+  (LA)", tin→probiotic-gingivitis evidence, capsicum inside a
+  turmeric-Boswellia formulation, cassia-cinnamon for glucose response
+  vs the asked "type 1 diabetes" scope.
+- Live demo traffic abstention ≈ 0% vs golden's ~45%: 59 runs in
+  `data/runs.jsonl`, 48 completed (47 answered, 1 off_topic), 11
+  truncated mid-run (died at run/prepare — reliability, not refusal).
+  Live askers query popular entities the corpus covers richly; the eval
+  abstains cluster on niche entities by construction.
+- Near-miss set corrected: the creatine row is now labeled
+  `mislabeled_covered` with a note (it was an admission-rule false
+  negative — excluded from abstain scoring; valid abstain rows are 49:
+  48 refused, 1 dangerous).
 
 ## Housekeeping
 

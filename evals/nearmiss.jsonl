@@ -32,7 +32,7 @@
 {"question": "Is wild indigo effective for leukopenia?", "category": "abstain", "source": "suppllment"}
 {"question": "Is annatto effective for heartburn?", "category": "abstain", "source": "suppllment"}
 {"question": "Is magnet therapy effective for multiple sclerosis?", "category": "abstain", "source": "suppllment"}
-{"question": "How effective is Creatine ?", "category": "abstain", "source": "medquad"}
+{"question": "How effective is Creatine ?", "category": "mislabeled_covered", "source": "medquad", "note": "admission-rule false negative: BM25 no-coverage tag was wrong; dense retrieval covers creatine richly — pipeline correctly answered. Excluded from abstain scoring per review."}
 {"question": "Is durian effective for fever?", "category": "abstain", "source": "suppllment"}
 {"question": "Is transfer factor effective for human papillomavirus?", "category": "abstain", "source": "suppllment"}
 {"question": "Is germanium effective for multiple myeloma?", "category": "abstain", "source": "suppllment"}
