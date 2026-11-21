@@ -190,16 +190,20 @@ diagram, it should work; if something here gets fixed, delete the line.
   earlier read blamed weak retrieval because abstains averaged 0.33
   best-chunk vs 0.82 answered. Rebuilding each row's real fused pack
   (BM25 top-20 + dense, RRF, rare-entity prepend) against the row's
-  `evidence_pmids` flips that: **21 of 22** answerable-unclear rows had at
-  least one answer-bearing PMID inside the top-10 pack — retrieval found
-  it, the extract/verify layer scored it insufficient. Only 1 of 22 was a
-  true miss (arnica/stiffness). The 0.33 was the verifier's score *on
-  present evidence*, not evidence absence — the strictness class is the
-  bulk, not a subset. Within it, `has_rel` failures cluster on
-  phrasing aliases, not hedge words alone: safflower→"linoleic acid
-  (LA)", tin→probiotic-gingivitis evidence, capsicum inside a
-  turmeric-Boswellia formulation, cassia-cinnamon for glucose response
-  vs the asked "type 1 diabetes" scope.
+  `evidence_pmids` flips that: **21 of 22** answerable-unclear rows had a
+  marked evidence PMID inside the top-10 pack; only arnica/stiffness was a
+  true miss. Caveat: `evidence_pmids` are soft associations, not ground
+  truth — a third of in-pack rows' marked chunks never mention the asked
+  entity (blond-psyllium→gut-status study, motherwort→probiotics,
+  capsicum→turmeric-Boswellia, acupuncture→vitamins). Refined split of
+  the 22: ~10 entity-present rows are the genuine strictness/phrasing
+  class (honey, histidine, camphor, onion, canthaxanthin, horse chestnut,
+  timothy grass, gotu kola, massage, safflower); ~7 label noise
+  (abstention likely correct — corpus genuinely thin); ~4 scope/question
+  issues (cassia T1D measured healthy subjects, "What is grapefruit?",
+  tai-chi rows); 1 retrieval miss. Within the strictness class `has_rel`
+  fails on alias/indirect phrasing: safflower→"linoleic acid (LA)",
+  tin→"stannous fluoride". The eval labels themselves need an audit pass.
 - Live demo traffic abstention ≈ 0% vs golden's ~45%: 59 runs in
   `data/runs.jsonl`, 48 completed (47 answered, 1 off_topic), 11
   truncated mid-run (died at run/prepare — reliability, not refusal).
