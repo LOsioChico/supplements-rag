@@ -534,6 +534,8 @@ def _build_app():
                 ev = {"event": "prepare", "ms": round((time.monotonic() - t) * 1000)}
                 collected.append(ev)
                 yield _sse(ev)
+                # await while connected — post-disconnect writes never run
+                await _store_run(env, rid, q, collected, source)
 
                 index = _index_view(env, q)
                 # the chunk pool = every id the fusion can pick: the sparse
@@ -545,6 +547,7 @@ def _build_app():
                 ids += bm25.rare_hits(index, q)
                 chunks = _fetch_chunks(env, ids)
 
+                marked = {e["event"] for e in collected}
                 for ev in answer_events(
                     q,
                     dense,
@@ -557,6 +560,9 @@ def _build_app():
                 ):
                     collected.append(ev)
                     yield _sse(ev)
+                    if ev["event"] not in marked:
+                        marked.add(ev["event"])
+                        await _store_run(env, rid, q, collected, source)
             except Exception as e:  # noqa: BLE001 — fail closed, same as serve.py
                 ev = {
                     "event": "status",

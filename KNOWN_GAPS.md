@@ -89,9 +89,12 @@ diagram, it should work; if something here gets fixed, delete the line.
   and handled: no sockets (judge/writer over sync `httpx2`), no threads
   (`_pool.py` serial executor on `emscripten`), lazy app construction
   (startup memory). Per-ask event log lands in the D1 `runs` table —
-  completed and abandoned runs alike (stub insert at stream start +
-  update on completion; disconnect-tested on prod: a killed stream left
-  the `prepare_begin` stub row, `cold` flag included) and is publicly
+  stub insert at stream start, then the row is re-stored at each new
+  event kind while the client is connected (awaited, not `wait_until` —
+  post-disconnect `wait_until` never runs, so a stub's last stored event
+  marks the stage an abandoned ask died in; verified on local `wrangler
+  dev`: a stream cut mid-extract left the row ending at `extract`) and is
+  publicly
   readable — the stream's `run` event carries an opaque public id,
   `GET /sr/v1/run/{rid}` returns the stored events (same route on local
   `serve.py` over `runs.jsonl`). Verified live,
@@ -212,7 +215,10 @@ diagram, it should work; if something here gets fixed, delete the line.
   real abstention on a popular entity) — and 4 stubs that died before a
   verdict (~44% abandon rate, the bigger live signal). Several rows are
   the owner's own tests (curl UA, "test cf"/"test visitor"). Too thin to
-  compare rates vs golden's ~45%; watch as traffic grows.
+  compare rates vs golden's ~45%; watch as traffic grows. Since the fix,
+  a stub's last stored event marks where it died — bots leaving at
+  `prepare`, users leaving mid-`extract`, and isolate deaths become
+  distinguishable in the row itself.
 - Near-miss set corrected: the creatine row is now labeled
   `mislabeled_covered` with a note (it was an admission-rule false
   negative — excluded from abstain scoring; valid abstain rows are 49:
