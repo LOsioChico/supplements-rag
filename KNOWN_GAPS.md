@@ -204,11 +204,15 @@ diagram, it should work; if something here gets fixed, delete the line.
   tai-chi rows); 1 retrieval miss. Within the strictness class `has_rel`
   fails on alias/indirect phrasing: safflower→"linoleic acid (LA)",
   tin→"stannous fluoride". The eval labels themselves need an audit pass.
-- Live demo traffic abstention ≈ 0% vs golden's ~45%: 59 runs in
-  `data/runs.jsonl`, 48 completed (47 answered, 1 off_topic), 11
-  truncated mid-run (died at run/prepare — reliability, not refusal).
-  Live askers query popular entities the corpus covers richly; the eval
-  abstains cluster on niche entities by construction.
+- Live-traffic abstention — corrected scope (2026-11-21): `data/runs.jsonl`
+  (59 runs) is LOCAL dev traffic — zero `visitor` events, zero source
+  attribution; treat it as smoke-test history, not visitor signal. The real
+  visitor ledger is production D1 `runs` (9 rows): 5 completed verdicts —
+  3 answered, 1 off_topic, 1 unclear ("does melatonin help jet lag?", a
+  real abstention on a popular entity) — and 4 stubs that died before a
+  verdict (~44% abandon rate, the bigger live signal). Several rows are
+  the owner's own tests (curl UA, "test cf"/"test visitor"). Too thin to
+  compare rates vs golden's ~45%; watch as traffic grows.
 - Near-miss set corrected: the creatine row is now labeled
   `mislabeled_covered` with a note (it was an admission-rule false
   negative — excluded from abstain scoring; valid abstain rows are 49:
